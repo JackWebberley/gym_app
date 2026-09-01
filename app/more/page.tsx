@@ -111,6 +111,9 @@ export default async function MorePage() {
         />
       </Group>
 
+      {/* Meals has its own tab, so its screens are not repeated here — More is
+          the home for what the tab bar does not carry. */}
+
       <section className="px-4">
         <SectionHeader title="Appearance" />
         <Card className="flex items-center justify-between gap-4 py-4">

@@ -5,11 +5,15 @@ import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { cx } from "./ui";
 
-/// Four destinations, not six. The old bar listed every screen in the app, which
-/// put the two things you actually open daily — today's food and the next
-/// workout — beside three setup screens you touch once a month. Groups, cycles,
-/// exercises, goals and history now live behind "More"; the tabs are the app's
-/// daily loop.
+/// Five destinations, not ten. The original bar listed every screen in the app,
+/// which put the things you open daily — today's food and the next workout —
+/// beside setup screens you touch once a month. Groups, cycles, exercises, goals
+/// and history live behind "More".
+///
+/// Meals earns a tab despite planning being a weekly job rather than a daily one,
+/// because it is not one screen: it is a menu, a shop, a pantry and a recipe
+/// library. Behind "More" they were a submenu of a submenu, which is a good way
+/// to build something nobody can find.
 
 function Icon({ children }: { children: ReactNode }) {
   return (
@@ -57,6 +61,20 @@ const NAV = [
         <path d="M3.6 11.4h16.8a8.4 8.4 0 0 1-16.8 0Z" />
         <path d="M2.6 20.4h18.8" />
         <path d="M9.4 7.6c0-1 1-1.5 1-2.5s-1-1.6-1-1.6M14.2 7.6c0-1 1-1.5 1-2.5s-1-1.6-1-1.6" />
+      </Icon>
+    ),
+  },
+  {
+    href: "/meals",
+    label: "Meals",
+    // A basket, not another plate: this tab is the week's shop and what it
+    // produces, where Food is the day in front of you.
+    icon: (
+      <Icon>
+        <path d="M2.8 9.4h18.4" />
+        <path d="M4.9 9.4 6.1 18.6a1.1 1.1 0 0 0 1.1 1h9.6a1.1 1.1 0 0 0 1.1-1l1.2-9.2" />
+        <path d="M9.1 3.4 7.3 9.4M14.9 3.4l1.8 6" />
+        <path d="M10 13v3.2M14 13v3.2" />
       </Icon>
     ),
   },

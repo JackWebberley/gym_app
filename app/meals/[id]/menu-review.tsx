@@ -137,6 +137,12 @@ export function MenuReview({
                     >
                       <p className="truncate text-body-sm font-medium text-fg-strong">
                         {cook.name}
+                        {cook.repeatTotal > 1 ? (
+                          <span className="font-normal text-fg-muted">
+                            {" "}
+                            — cook {cook.repeatIndex} of {cook.repeatTotal}
+                          </span>
+                        ) : null}
                       </p>
                       <p className="mt-0.5 font-mono text-micro tracking-wide text-fg-faint">
                         {cook.mealType.toUpperCase()} · {cook.servingsForMe}

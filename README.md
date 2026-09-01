@@ -3,9 +3,9 @@
 Personal single-user training and nutrition tracker. Built against
 [`gym-nutrition-app-spec.md`](./gym-nutrition-app-spec.md).
 
-**Phases 1 and 2 are built** — workout logging, and nutrition tracking with chat
-estimation and the personal food library. The feedback loop (§6) and meal planning
-(§8) are later phases in §9 of the spec.
+**Phases 1, 2, 6 and 7 are built** — workout logging; nutrition tracking with chat
+estimation and the personal food library; and meal planning with the ingredient
+economy optimiser. The feedback loop (§6) is the remaining major phase.
 
 ## Running it
 
@@ -15,6 +15,7 @@ cp .env.example .env # then paste your two Supabase connection strings
 npm run db:check     # proves both connections work before anything else
 npm run db:deploy    # applies migrations over the direct connection
 npm run db:seed      # 81 exercises + a Push/Pull/Legs starter cycle
+npm run db:seed:meals # 104 UK ingredients with pack sizes + 18 starter recipes
 npm run dev
 ```
 
@@ -150,6 +151,101 @@ reaches the database. The passcode is **not in the repo**: it comes from
 The cookie is HttpOnly, scoped to `/gym`, and its signature covers the expiry so
 it cannot be extended by hand. Sessions last 90 days.
 
+## How the meal planner works
+
+**It plans a menu, not a week.** The spec pins every planned meal to a date
+(§8.2). This does not, because cooking here is shared between two people and
+genuinely irregular, and a dated plan is wrong by Tuesday — at which point you
+stop opening it and the £40 shop rots. A menu is a set of **cooks**, each
+producing **servings** that sit in a pool until somebody eats them. The shop is
+the commitment; the calendar is not.
+
+Eating out therefore needs no feature at all. You log the restaurant meal with the
+chat estimator, the pool simply does not drain, and the servings keep. That is the
+test of the design being right: the awkward case required zero special handling.
+
+**Recipes are fitted to envelopes, not to days.** A serving that could be eaten on
+any day cannot be tuned to Tuesday's remainder, so each recipe is fitted to the
+share a meal type earns of a daily target — a dinner lands near 672 kcal for me,
+476 for her. Day-level precision comes back at log time: tap a serving on the Food
+screen and the scalable components are re-tuned against what is actually left
+(§8.5). That matches the spec's own view that the weekly average decides results
+and the daily figure is noise (§5.4).
+
+**Two people, one log.** Each cook makes a portion for each of you with its own
+scale factor, so one dish is 180g of chicken for me and 120g for her. The shop is
+sized off the *sum* of the factors — 300g, not 360g — while fixed components like
+oil still multiply per portion. Her servings drain the pool so the app knows the
+food is gone; only mine ever reach a `DayLog`.
+
+**Uncertainty is an input, not a problem.** Instead of a schedule you say how sure
+the week is. That becomes a slippage term: the less certain the week, the harder
+the optimiser leans on recipes that freeze and keep, so being wrong is cheap by
+construction.
+
+### Where the recipes come from
+
+The library first, always. Claude is asked only for what the library genuinely
+cannot cover, and it is asked from a basket we chose — the pantry, plus the
+ingredients the library candidates already commit us to. Anything it writes is
+saved, so the API gets asked less every week, exactly as `SavedFood` does for
+estimation (§5.3). **The model never does arithmetic** (§8.1): it returns
+ingredient names and grams, and every macro, price, pack and waste figure is
+computed here from the `Ingredient` table.
+
+### How it avoids buying a pack of onions for one onion
+
+By costing the **basket**, never the recipe. Ingredient needs are summed across
+every selected recipe, the pantry is spent first, and only then are packs chosen:
+
+```
+one recipe needing 1 onion    → a pack of 3 → 2 spare → waste charged
+plus one needing 2 more       → same pack   → 0 spare → the onions were free
+```
+
+The second recipe's marginal cost is near zero, so the search prefers it. Nothing
+in the scoring function mentions overlap — it falls out of pricing the shop
+instead of the dish. Greedy construction makes this explicit by adding whichever
+recipe is cheapest *given what is already in the basket*, then hill-climbing with
+random restarts polishes it. Deterministic given a seed, which is what makes
+"reroll" meaningful. A realistic week solves in about 80ms.
+
+**Waste is weighted by perishability, not by how much is left over** (§8.4):
+
+| | charged |
+|---|---|
+| staples (oil, salt, spices) | nothing — never costed or shopped |
+| keeps 90+ days — tins, jars, dry goods | 5% — that is inventory, not waste |
+| short-lived but freezable — chicken | 15% |
+| survives to next week — potatoes | 30% |
+| spoils first — fresh herbs | 100% |
+
+The 90-day tier is an addition to the spec's three. Its own data model anticipates
+shelf lives of "365 for tinned" (§8.2), and charging a 500g jar of mayonnaise 30%
+of its value because one recipe used 30g is simply wrong — the jar gets finished,
+and the pantry already tracks it. Without that tier the optimiser quietly avoids
+every recipe containing a condiment.
+
+`isDivisible` sidesteps the problem entirely where the shop allows it: loose onions
+mean buy exactly 550g.
+
+### The pantry is the part that compounds
+
+Marking a shop done files every leftover into the pantry with a computed expiry and
+deducts what the plan drew out. The next plan sees free stock, weights recipes that
+use it, and charges itself for anything about to expire unused. Watch the
+projected-waste line on the shopping list fall over the first month.
+
+### A caution
+
+§9 warns that an optimiser tuned on seed data "will make choices that look fine and
+cook badly", and that is still true here. The weights in `lib/meal/optimiser.ts`
+are all expressed in pounds so they can be argued with, and the pack prices in
+`seed-ingredients.ts` are mid-range guesses. Correct prices as you shop — relative
+pack economics are what the optimiser actually needs, and those stay stable long
+after the absolute figures are stale. A re-seed never overwrites a price you have
+edited.
+
 ## Deploying (Cloudflare Workers)
 
 Built with [`@opennextjs/cloudflare`](https://opennext.js.org/cloudflare). In the
@@ -209,6 +305,14 @@ app/
   food/                       daily tracking, chat + manual entry
   food/goals/                 calorie and protein targets
   food/library/               saved foods, aliases, corrections
+  food/ready-now.tsx          planned servings, logged in one tap
+  meals/                      the menu, the pool, the readout
+  meals/plan/                 the brief: how many meals, how sure the week is
+  meals/[id]/                 review: lock, swap, reroll, confirm
+  meals/[id]/shopping/        the shop by aisle, with the waste line
+  meals/recipes/              the recipe library
+  meals/pantry/               leftover stock and expiry dates
+  meals/household/            her targets, and how a day divides
 lib/
   relative-day.ts             "yesterday", "3 days ago" — shared by Today and Train
   progression.ts              §4.3 progression cues — pure, rule-based, tested
@@ -216,19 +320,32 @@ lib/
   prefill.ts                  §4.2 prefill from last time — pure, tested
   units.ts                    kg/kcal only, Epley e1RM
   day.ts                      §11 local-date keys, day targets — pure, tested
-  nutrition.ts                the ONLY module that calls the Anthropic API (§11)
+  anthropic.ts                owns the API client; only two modules may use it
+  nutrition.ts                §5.2 macro estimation — one of those two
   nutrition-queries.ts        read models for the food screens
   nutrition-actions.ts        every nutrition mutation
+  meal/types.ts               plain domain types, no Prisma
+  meal/portions.ts            §8.5 scaling and ingredient quantities — pure, tested
+  meal/envelopes.ts           what a meal of each type should land on — pure, tested
+  meal/packs.ts               §8.1 cooking quantities → shop quantities — pure, tested
+  meal/basket.ts              §8.4 costing the shop and the waste — pure, tested
+  meal/optimiser.ts           §8.4 the search — pure, tested, deterministic
+  meal/generate.ts            §8.3 recipe generation — the other API caller
+  meal-queries.ts             read models for the meal screens
+  meal-actions.ts             every meal mutation
   queries.ts                  read models for the screens
   actions.ts                  every mutation
 prisma/
-  schema.prisma               Phase 1 models
+  schema.prisma               all models
   seed.ts                     exercise library + starter cycle
+  seed-ingredients.ts         UK ingredients with pack sizes and prices
+  seed-meals.ts               seeds those, plus starter recipes
 ```
 
-The three pure modules in `lib/` hold every rule that could silently mislead you
-for months if it were wrong, which is why they are the only things with tests
-(spec §11).
+The pure modules in `lib/` hold every rule that could silently mislead you for
+months if it were wrong, which is why they carry all the tests (spec §11). For
+the planner that means the whole optimiser: what a pack costs, what a surplus is
+worth, how a dish scales, and what the search actually optimises for.
 
 ## Notes
 

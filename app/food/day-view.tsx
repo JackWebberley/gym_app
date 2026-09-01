@@ -12,6 +12,8 @@ import {
   type ConfirmedItem,
 } from "@/lib/nutrition-actions";
 import type { DayScreen } from "@/lib/nutrition-queries";
+import type { PoolPortion } from "@/lib/meal-queries";
+import { ReadyNow } from "./ready-now";
 import {
   Badge,
   Button,
@@ -29,7 +31,16 @@ import {
 
 type Draft = ConfirmedItem & { key: string };
 
-export function DayView({ day, canEstimate }: { day: DayScreen; canEstimate: boolean }) {
+export function DayView({
+  day,
+  canEstimate,
+  pool = [],
+}: {
+  day: DayScreen;
+  canEstimate: boolean;
+  /// Planned servings waiting to be eaten. Empty unless a menu has been shopped.
+  pool?: PoolPortion[];
+}) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
@@ -317,6 +328,9 @@ export function DayView({ day, canEstimate }: { day: DayScreen; canEstimate: boo
           )}
         </Card>
       )}
+
+      {/* ── Planned servings ────────────────────────────────────────────── */}
+      <ReadyNow pool={pool} dayKey={day.dayKey} caloriesLeft={day.calories.left} />
 
       {/* ── Quick add ───────────────────────────────────────────────────── */}
       {day.quickAdd.length > 0 ? (
