@@ -256,10 +256,26 @@ export async function logSavedFood(input: { dayKey: string; savedFoodId: string 
   revalidatePath("/");
 }
 
+/**
+ * Removes a logged entry.
+ *
+ * If the entry came from a planned serving, that serving goes back into the pool
+ * rather than vanishing. `Portion.foodEntryId` is a plain column with no foreign
+ * key — Portion cannot reference FoodEntry without coupling the nutrition schema
+ * to the meal planner — so nothing releases it automatically, and without this
+ * the serving ends up neither logged nor available: silently lost.
+ */
 export async function deleteEntry(entryId: string) {
+  const released = await db.portion.updateMany({
+    where: { foodEntryId: entryId },
+    data: { status: "planned", eatenOn: null, foodEntryId: null },
+  });
+
   await db.foodEntry.delete({ where: { id: entryId } }).catch(() => {});
+
   revalidatePath("/food");
   revalidatePath("/");
+  if (released.count > 0) revalidatePath("/meals");
 }
 
 // ── Library ───────────────────────────────────────────────────────────────────

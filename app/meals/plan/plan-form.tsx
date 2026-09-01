@@ -63,6 +63,7 @@ export function PlanForm({
     lunch: { count: 5, distinct: 2 },
     dinner: { count: 4, distinct: 3 },
   });
+  const [name, setName] = useState("");
   const [confidence, setConfidence] = useState<CookConfidence>("flexible");
   const [maxPrep, setMaxPrep] = useState<string>("");
   const [avoid, setAvoid] = useState<string[]>([]);
@@ -102,6 +103,7 @@ export function PlanForm({
 
     startTransition(async () => {
       const result = await planMenu({
+        name,
         brief: {
           weekStart,
           occasions,
@@ -131,6 +133,20 @@ export function PlanForm({
 
   return (
     <div className="space-y-5 px-4">
+      <Card>
+        <Label htmlFor="plan-name">Call this plan</Label>
+        <Input
+          id="plan-name"
+          value={name}
+          placeholder={`Week of ${weekStart}`}
+          onChange={(e) => setName(e.target.value)}
+        />
+        <Hint>
+          Plans are kept, not replaced. This one becomes the active plan and the others stay
+          where they are, so you can switch back to any of them.
+        </Hint>
+      </Card>
+
       <Card>
         <Eyebrow className="mb-3">How many meals</Eyebrow>
         <div className="space-y-4">

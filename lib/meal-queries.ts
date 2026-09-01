@@ -214,12 +214,55 @@ function daysBetween(from: string, to: string): number {
 
 /* ── Menus ─────────────────────────────────────────────────────────────────── */
 
+/**
+ * The plan the hub and the pool read from.
+ *
+ * Falls back to the most recent when nothing is flagged active — a plan created
+ * before plans were switchable, or one left behind by a delete.
+ */
 export async function getCurrentMenu() {
-  return db.menu.findFirst({
-    where: { status: { in: ["draft", "confirmed", "shopped"] } },
-    orderBy: [{ createdAt: "desc" }],
-    select: { id: true, weekStart: true, status: true },
+  const active = await db.menu.findFirst({
+    where: { isActive: true },
+    select: { id: true, name: true, weekStart: true, status: true },
   });
+  if (active) return active;
+
+  return db.menu.findFirst({
+    orderBy: [{ createdAt: "desc" }],
+    select: { id: true, name: true, weekStart: true, status: true },
+  });
+}
+
+export type PlanSummary = Awaited<ReturnType<typeof getMenuList>>[number];
+
+/** Every plan, for the switcher. */
+export async function getMenuList() {
+  const menus = await db.menu.findMany({
+    orderBy: [{ isActive: "desc" }, { createdAt: "desc" }],
+    select: {
+      id: true,
+      name: true,
+      weekStart: true,
+      status: true,
+      isActive: true,
+      createdAt: true,
+      estimatedCostGbp: true,
+      projectedWasteGbp: true,
+      _count: { select: { cooks: true } },
+    },
+  });
+
+  return menus.map((m) => ({
+    id: m.id,
+    name: m.name ?? `Week of ${m.weekStart}`,
+    weekStart: m.weekStart,
+    status: m.status as "draft" | "confirmed" | "shopped",
+    isActive: m.isActive,
+    createdAt: m.createdAt.toISOString(),
+    estimatedCostGbp: m.estimatedCostGbp,
+    projectedWasteGbp: m.projectedWasteGbp,
+    cookCount: m._count.cooks,
+  }));
 }
 
 export type MenuScreen = NonNullable<Awaited<ReturnType<typeof getMenuScreen>>>;
@@ -252,6 +295,8 @@ export async function getMenuScreen(menuId: string) {
 
   return {
     id: menu.id,
+    name: menu.name ?? `Week of ${menu.weekStart}`,
+    isActive: menu.isActive,
     weekStart: menu.weekStart,
     status: menu.status as "draft" | "confirmed" | "shopped",
     estimatedCostGbp: menu.estimatedCostGbp,

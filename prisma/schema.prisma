@@ -379,14 +379,22 @@ model PantryItem {
 /// A week of cooking: a set of cooks and the shop that supplies them. Nothing
 /// inside it carries a date.
 model Menu {
-  id        String @id @default(cuid())
+  id        String  @id @default(cuid())
+  /// What the user calls this plan. Defaults to the week it was made for, but it
+  /// is a label rather than a schedule — plans are kept, switched between and
+  /// reused, not consumed by the calendar.
+  name      String?
   /// Day key of the Monday this menu was planned for. A label only — no cook is
   /// bound to a day.
   weekStart String
+  /// Exactly one plan is active at a time; the hub and the pool read from it.
+  /// Mirrors how Cycle works for training, for the same reason: several may exist
+  /// but only one is the one you are currently on.
+  isActive  Boolean @default(false)
   /// draft | confirmed | shopped
-  status    String @default("draft")
+  status    String  @default("draft")
   /// The brief it was solved against, so a reroll re-solves the same question.
-  briefJson String @default("{}")
+  briefJson String  @default("{}")
 
   /// The optimiser readout at solve time, kept so the review screen never has to
   /// re-solve in order to show its own numbers.

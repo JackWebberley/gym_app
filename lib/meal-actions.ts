@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { db } from "./db";
-import { isValidDayKey, shiftDayKey, todayKey } from "./day";
+import { formatDayKey, isValidDayKey, shiftDayKey, todayKey } from "./day";
 import { getOrCreateDay } from "./nutrition-queries";
 import {
   getPlanningContext,
@@ -60,6 +60,8 @@ export async function planMenu(input: {
   brief: Brief;
   allowGeneration: boolean;
   seed?: number;
+  /** What to call this plan. Defaults to the week it was built for. */
+  name?: string;
 }): Promise<PlanResult> {
   const brief = input.brief;
   if (!isValidDayKey(brief.weekStart)) return { kind: "error", message: "Invalid week start." };
@@ -87,13 +89,16 @@ export async function planMenu(input: {
       horizonDayKey: shiftDayKey(brief.weekStart, 7),
     });
 
-    // One menu at a time: an old draft is replaced rather than accumulated, so
-    // "the plan" is never ambiguous.
-    await db.menu.deleteMany({ where: { status: "draft" } });
+    // Plans are kept, not consumed. Creating one makes it the active plan and
+    // leaves every earlier plan intact to switch back to — an unshopped draft is
+    // still worth keeping, and a shopped one is a record of what you bought.
+    await db.menu.updateMany({ where: { isActive: true }, data: { isActive: false } });
 
     const menu = await db.menu.create({
       data: {
+        name: input.name?.trim() || `Week of ${formatDayKey(brief.weekStart)}`,
         weekStart: brief.weekStart,
+        isActive: true,
         status: "draft",
         briefJson: JSON.stringify({ ...brief, seed }),
         estimatedCostGbp: solution.basket.totalCostGbp,
@@ -407,7 +412,56 @@ export async function swapCook(input: { cookId: string; recipeId: string }) {
 }
 
 export async function deleteMenu(menuId: string) {
+  const menu = await db.menu.findUnique({ where: { id: menuId } });
   await db.menu.delete({ where: { id: menuId } }).catch(() => {});
+
+  // Never leave the app with no active plan while others still exist, or the hub
+  // shows an empty state next to a list of perfectly good plans.
+  if (menu?.isActive) {
+    const next = await db.menu.findFirst({ orderBy: { createdAt: "desc" } });
+    if (next) await db.menu.update({ where: { id: next.id }, data: { isActive: true } });
+  }
+  revalidatePool();
+}
+
+/** Switches which plan the hub and the pool read from. */
+export async function activateMenu(menuId: string) {
+  const menu = await db.menu.findUnique({ where: { id: menuId } });
+  if (!menu) throw new Error("That plan no longer exists.");
+
+  await db.$transaction([
+    db.menu.updateMany({ where: { isActive: true }, data: { isActive: false } }),
+    db.menu.update({ where: { id: menuId }, data: { isActive: true } }),
+  ]);
+  revalidatePool();
+}
+
+export async function renameMenu(input: { menuId: string; name: string }) {
+  const name = input.name.trim();
+  if (!name) throw new Error("Give the plan a name.");
+  await db.menu.update({ where: { id: input.menuId }, data: { name } });
+  revalidatePool();
+}
+
+/**
+ * Removes one cook from a plan, and its servings with it.
+ *
+ * The shop is left as it was on purpose: once a plan is confirmed, the list is
+ * what you actually shopped from, and silently rewriting it would misrepresent
+ * what you bought. Re-confirm to rebuild it around the change.
+ */
+export async function deleteCook(cookId: string) {
+  const cook = await db.menuCook.findUnique({ where: { id: cookId } });
+  if (!cook) return;
+  await db.menuCook.delete({ where: { id: cookId } });
+  if (cook.menuId) await recostMenu(cook.menuId);
+  revalidatePool();
+}
+
+/** Empties a plan of every cook, leaving the plan itself to build back up. */
+export async function clearMenuCooks(menuId: string) {
+  await db.menuCook.deleteMany({ where: { menuId } });
+  await recostMenu(menuId);
   revalidatePool();
 }
 

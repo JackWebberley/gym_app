@@ -4,7 +4,9 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
+  clearMenuCooks,
   confirmMenu,
+  deleteCook,
   deleteMenu,
   markCooked,
   markNotCooked,
@@ -45,6 +47,7 @@ export function MenuReview({
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [confirmingClear, setConfirmingClear] = useState(false);
 
   const isDraft = menu.status === "draft";
   const totalServings = menu.cooks.reduce((n, c) => n + c.servingsForMe, 0);
@@ -110,15 +113,47 @@ export function MenuReview({
         <SectionHeader
           title="The cooks"
           action={
-            isDraft ? (
-              <button
-                type="button"
-                disabled={isPending}
-                onClick={() => run(() => rerollMenu(menu.id))}
-                className="text-caption text-fg-accent underline-offset-2 hover:underline disabled:opacity-40"
-              >
-                Reroll unlocked
-              </button>
+            menu.cooks.length > 0 ? (
+              <span className="flex items-center gap-3">
+                {isDraft ? (
+                  <button
+                    type="button"
+                    disabled={isPending}
+                    onClick={() => run(() => rerollMenu(menu.id))}
+                    className="text-caption text-fg-accent underline-offset-2 hover:underline disabled:opacity-40"
+                  >
+                    Reroll unlocked
+                  </button>
+                ) : null}
+                {confirmingClear ? (
+                  <span className="flex items-center gap-2">
+                    <span className="text-caption text-danger">Remove all {menu.cooks.length}?</span>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      disabled={isPending}
+                      onClick={() => {
+                        setConfirmingClear(false);
+                        run(() => clearMenuCooks(menu.id));
+                      }}
+                    >
+                      Yes
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setConfirmingClear(false)}>
+                      No
+                    </Button>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={isPending}
+                    onClick={() => setConfirmingClear(true)}
+                    className="text-caption text-fg-faint underline-offset-2 transition-colors hover:text-danger hover:underline disabled:opacity-40"
+                  >
+                    Remove all
+                  </button>
+                )}
+              </span>
             ) : undefined
           }
         />
@@ -154,6 +189,16 @@ export function MenuReview({
                       {cook.batchFriendly && cook.servingsForMe > 1 ? <Tag>batch</Tag> : null}
                       {cook.leftoversFreeze ? <Tag>freezes</Tag> : null}
                       {cook.cookedAt ? <Badge tone="success">cooked</Badge> : null}
+                      <button
+                        type="button"
+                        aria-label={`Remove ${cook.name} from this plan`}
+                        title="Remove from this plan"
+                        disabled={isPending}
+                        onClick={() => run(() => deleteCook(cook.id))}
+                        className="h-7 w-7 shrink-0 rounded-pill border border-hairline text-fg-faint transition-colors hover:border-tint-danger-border hover:bg-tint-danger hover:text-danger disabled:opacity-40"
+                      >
+                        ✕
+                      </button>
                     </div>
                   </div>
 

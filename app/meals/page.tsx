@@ -3,10 +3,12 @@ import { todayKey } from "@/lib/day";
 import {
   countMealLibrary,
   getCurrentMenu,
+  getMenuList,
   getMenuScreen,
   getPantryScreen,
   getPool,
 } from "@/lib/meal-queries";
+import { PlanSwitcher } from "./plan-switcher";
 import { formatGrams } from "@/lib/meal/packs";
 import {
   Badge,
@@ -30,11 +32,12 @@ export const dynamic = "force-dynamic";
 
 export default async function MealsPage() {
   const today = todayKey();
-  const [menuRef, pool, pantry, counts] = await Promise.all([
+  const [menuRef, pool, pantry, counts, plans] = await Promise.all([
     getCurrentMenu(),
     getPool(today),
     getPantryScreen(today),
     countMealLibrary(),
+    getMenuList(),
   ]);
 
   const menu = menuRef ? await getMenuScreen(menuRef.id) : null;
@@ -60,7 +63,7 @@ export default async function MealsPage() {
           <Card>
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <Eyebrow>{statusLabel(menu.status)}</Eyebrow>
+                <Eyebrow>{menu.name}</Eyebrow>
                 <p className="mt-1 text-body-md font-medium text-fg-strong">
                   {menu.cooks.length} {menu.cooks.length === 1 ? "cook" : "cooks"} ·{" "}
                   {menu.cooks.reduce((n, c) => n + c.servingsForMe, 0)} of my servings
@@ -175,6 +178,8 @@ export default async function MealsPage() {
           </section>
         ) : null}
 
+        <PlanSwitcher plans={plans} />
+
         {/* ── Library ───────────────────────────────────────────────────── */}
         <section className="pb-4">
           <SectionHeader title="Library" />
@@ -214,12 +219,6 @@ export default async function MealsPage() {
       </div>
     </main>
   );
-}
-
-function statusLabel(status: "draft" | "confirmed" | "shopped"): string {
-  if (status === "draft") return "This week — draft";
-  if (status === "confirmed") return "This week — confirmed";
-  return "This week — shopped";
 }
 
 function Figure({ label, value, sub }: { label: string; value: string; sub?: string }) {
