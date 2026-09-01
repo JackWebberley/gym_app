@@ -99,6 +99,9 @@ export function BottomNav() {
             <Link
               key={item.href}
               href={item.href}
+              // The bar is always on screen, so every tab prefetches up to its loading
+              // boundary. Without this a dynamic route is only fetched on click.
+              prefetch
               aria-current={active ? "page" : undefined}
               className={cx(
                 "relative flex flex-1 flex-col items-center gap-1 pt-2.5 pb-2 text-micro font-medium tracking-wide no-underline transition-colors duration-(--dur-fast) ease-(--ease-standard) hover:no-underline",
