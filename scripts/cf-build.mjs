@@ -35,6 +35,54 @@ function run(cmd, args) {
   execFileSync(cmd, args, { stdio: "inherit", shell: process.platform === "win32" });
 }
 
+/**
+ * Refuses to build while `next dev` is running.
+ *
+ * Both write to `.next`, and they corrupt each other silently rather than
+ * failing: the build half-completes, the deploy ships new server HTML against
+ * stale client chunks, and every button in the app dies with a minified React
+ * error that points nowhere near the cause. The tell is the upload line —
+ * "Uploaded 1 file (42 already uploaded)" after changing several components.
+ *
+ * Failing loudly here costs a restart of the dev server. Not failing cost an
+ * afternoon.
+ */
+function assertNoDevServer() {
+  if (process.platform !== "win32") return; // CI and the Cloudflare builders run no dev server.
+
+  let out = "";
+  try {
+    out = execFileSync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-Command",
+        "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { $_.CommandLine -like '*next*dev*' } | Select-Object -ExpandProperty ProcessId",
+      ],
+      // No `shell: true` here on purpose: cmd.exe would split the PowerShell
+      // pipeline on its own `|` and the command would arrive in pieces.
+      { encoding: "utf8" },
+    );
+  } catch (e) {
+    // Say so rather than passing quietly. A guard that fails silently is worse
+    // than no guard, because it reads as an all-clear.
+    console.warn(`⚠ Could not check for a running dev server: ${e instanceof Error ? e.message : e}`);
+    return;
+  }
+
+  const pids = out.split(/\s+/).filter(Boolean);
+  if (pids.length === 0) return;
+
+  console.error(
+    `\n✘ A Next dev server is running (PID ${pids.join(", ")}).\n` +
+      `  It shares .next with this build and the two corrupt each other, which ships\n` +
+      `  a half-built bundle without failing. Stop it, then build again.\n`,
+  );
+  process.exit(1);
+}
+
+assertNoDevServer();
+
 console.log("→ generating the workerd Prisma client");
 setRuntime("workerd");
 
