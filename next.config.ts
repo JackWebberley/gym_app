@@ -34,6 +34,9 @@ const nextConfig: NextConfig = {
       "node_modules/next/dist/compiled/@vercel/og/**",
       // pg_dump is Prisma tooling, never used at runtime (~250KiB).
       "**/pg_dump.wasm",
+      // sharp is only used by scripts/generate-icons.mjs at author time.
+      "node_modules/sharp/**",
+      "node_modules/@img/**",
       // Bundlers and test tooling.
       "node_modules/esbuild/**",
       "node_modules/@esbuild/**",

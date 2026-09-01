@@ -93,11 +93,11 @@ function searchCombinations(packs: PackSpec[], gramsNeeded: number): PackChoice 
     if (index >= packs.length || used >= MAX_PACKS_TOTAL) return;
 
     const pack = packs[index];
-    // Never need more of one pack than covers the whole requirement on its own.
+    // Never need more of one pack than covers what is still short.
     const ceiling = Math.min(
       MAX_PACKS_PER_TYPE,
       MAX_PACKS_TOTAL - used,
-      Math.ceil(gramsNeeded / pack.grams),
+      Math.ceil((gramsNeeded - grams) / pack.grams),
     );
 
     for (let n = 0; n <= ceiling; n++) {

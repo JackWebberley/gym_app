@@ -1,11 +1,20 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
+import {
+  MODEL,
+  MissingApiKeyError,
+  createClient,
+  isConfigured,
+  withFriendlyErrors,
+} from "./anthropic";
 
-/// The only module in the codebase that touches the Anthropic API (spec §11).
-/// Everything else goes through `estimateMacros`.
+/// Macro estimation from natural language (spec §5.2). One of exactly two modules
+/// allowed to call the Anthropic API — the client itself lives in lib/anthropic.ts,
+/// which is how §11's "one place owns the API" survives a second, genuinely
+/// different use of it in lib/meal/generate.ts. Everything else goes through
+/// `estimateMacros`.
 
-const MODEL = "claude-opus-5";
+export { MissingApiKeyError };
 
 /// Portion size is where nearly all the estimation error lives, so the schema
 /// forces an explicit assumption and confidence for every item rather than
@@ -42,16 +51,6 @@ export type SavedFoodForPrompt = {
   carbsG: number;
   fatG: number;
 };
-
-/** Thrown when the app has no API key configured, so the UI can point at manual entry. */
-export class MissingApiKeyError extends Error {
-  constructor() {
-    super(
-      "No ANTHROPIC_API_KEY configured. Add it to .env to use chat estimation — manual entry still works.",
-    );
-    this.name = "MissingApiKeyError";
-  }
-}
 
 const SYSTEM_PROMPT = `You estimate nutritional macros from natural language food descriptions.
 
@@ -99,34 +98,6 @@ export function buildSystemBlocks(savedFoods: SavedFoodForPrompt[]): SystemBlock
 }
 
 /**
- * Turns the API's own error text into something actionable in the UI. Without
- * this, a key or config problem surfaces to the user as a raw 400 payload.
- */
-async function withFriendlyErrors<T>(run: () => Promise<T>): Promise<T> {
-  try {
-    return await run();
-  } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-
-    if (/anthropic-workspace-id/i.test(message)) {
-      throw new Error(
-        "This API key is identity-linked, so it needs a workspace. Add ANTHROPIC_WORKSPACE_ID=wrkspc_… to .env (Console → Settings → Workspaces), or create a workspace-scoped key instead.",
-      );
-    }
-    if (e instanceof Anthropic.AuthenticationError) {
-      throw new Error("ANTHROPIC_API_KEY was rejected. Check the key in .env.");
-    }
-    if (e instanceof Anthropic.RateLimitError) {
-      throw new Error("Rate limited by the API. Wait a moment and try again.");
-    }
-    if (e instanceof Anthropic.APIConnectionError) {
-      throw new Error("Could not reach the API. Check your connection, or log it manually.");
-    }
-    throw e;
-  }
-}
-
-/**
  * Estimates macros for a free-text meal description.
  *
  * Callers should try `resolveFromLibrary` first — a match there costs nothing and
@@ -136,16 +107,11 @@ export async function estimateMacros(
   description: string,
   savedFoods: SavedFoodForPrompt[] = [],
 ): Promise<MacroEstimate> {
-  if (!process.env.ANTHROPIC_API_KEY) throw new MissingApiKeyError();
+  if (!isConfigured()) {
+    throw new MissingApiKeyError("manual entry and your saved library still work without it.");
+  }
 
-  const workspaceId = process.env.ANTHROPIC_WORKSPACE_ID;
-
-  const client = new Anthropic({
-    // An identity-linked API key is not bound to a single workspace, so every
-    // request has to say which workspace it acts in. A workspace-scoped key
-    // carries that already and needs no header — hence only set it when present.
-    ...(workspaceId ? { defaultHeaders: { "anthropic-workspace-id": workspaceId } } : {}),
-  });
+  const client = createClient();
 
   const response = await withFriendlyErrors(() => client.messages.parse({
     model: MODEL,

@@ -120,6 +120,26 @@ the entry `corrected` and *does* replace them, because a correction is the
 strongest signal about what you actually eat. Your six most-logged foods sit on
 the day screen as one-tap buttons.
 
+## Icons
+
+All icons are generated from `Favicon.png` (1254×1254) by `npm run icons`:
+
+| File | Size | Used for |
+|---|---|---|
+| `app/icon.png` | 48 | browser tab |
+| `app/apple-icon.png` | 180 | iOS Add to Home Screen |
+| `public/icon-192.png` | 192 | web app manifest |
+| `public/icon-512.png` | 512 | web app manifest, splash |
+
+Next emits the link tags for the first two by convention. iOS reads the
+**apple-touch-icon**, not the manifest, for the home-screen tile — and
+`appleWebApp.capable` in the root layout is what makes it launch standalone
+rather than in a Safari tab.
+
+Next does not rewrite `basePath` inside a manifest, so `app/manifest.ts`
+prefixes every URL with `/gym` by hand. Getting that wrong fails silently: the
+manifest still parses and the icons simply never load.
+
 ## Access
 
 The whole app sits behind a passcode (spec §10 — one user, a passphrase is

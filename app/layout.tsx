@@ -27,6 +27,14 @@ const jetbrains = JetBrains_Mono({
 export const metadata: Metadata = {
   title: "Gym Tracker",
   description: "Training and nutrition tracker",
+  // iOS reads this, not the manifest, when you Add to Home Screen: capable
+  // gives a standalone window with no Safari chrome, and title is the label
+  // under the icon.
+  appleWebApp: {
+    capable: true,
+    title: "Gym",
+    statusBarStyle: "default",
+  },
 };
 
 export const viewport: Viewport = {

@@ -18,7 +18,9 @@
     "db:deploy": "prisma migrate deploy",
     "cf:build": "node scripts/cf-build.mjs",
     "cf:preview": "opennextjs-cloudflare preview",
-    "cf:deploy": "node scripts/cf-build.mjs && opennextjs-cloudflare deploy"
+    "cf:deploy": "node scripts/cf-build.mjs && opennextjs-cloudflare deploy",
+    "db:seed:meals": "tsx prisma/seed-meals.ts",
+    "icons": "node scripts/generate-icons.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.122.0",
@@ -40,6 +42,7 @@
     "dotenv": "^17.4.2",
     "postcss": "^8.5.26",
     "prisma": "^7.10.0",
+    "sharp": "^0.35.4",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.23.13",
     "typescript": "^5.9.3",
@@ -51,6 +54,8 @@
     "@prisma/engines@7.10.0": true,
     "better-sqlite3@12.11.1": true,
     "better-sqlite3@13.0.3": true,
-    "workerd@1.20260828.1": true
+    "workerd@1.20260828.1": true,
+    "sharp@0.35.2": true,
+    "sharp@0.35.4": true
   }
 }
