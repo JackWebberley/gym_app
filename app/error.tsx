@@ -32,6 +32,11 @@ export default function Error({
         <p className="mt-3 text-body-sm text-fg-muted">
           Nothing you have already logged is affected — sets are saved as you tick them.
         </p>
+        <p className="mt-2 text-caption text-fg-muted">
+          If the app was updated while this tab was open, reloading is the fix: the page is
+          running older code than the server and every button will keep failing until it
+          catches up.
+        </p>
 
         {error.digest ? (
           <div className="mt-4">
@@ -39,8 +44,22 @@ export default function Error({
           </div>
         ) : null}
 
-        <Button variant="accent" size="lg" fullWidth className="mt-5" onClick={reset}>
-          Try again
+        {/* Reload first, and deliberately so. `reset` only re-runs the render with
+            the same JavaScript already in memory, which cannot recover from the
+            most common cause of this screen — a deploy landing under an open tab,
+            leaving the client posting server actions the server no longer has.
+            Offering only "try again" there is an infinite loop with a button. */}
+        <Button
+          variant="accent"
+          size="lg"
+          fullWidth
+          className="mt-5"
+          onClick={() => window.location.reload()}
+        >
+          Reload the app
+        </Button>
+        <Button variant="secondary" size="lg" fullWidth className="mt-3" onClick={reset}>
+          Try again without reloading
         </Button>
         <Link
           href="/"
