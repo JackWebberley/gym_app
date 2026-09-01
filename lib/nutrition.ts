@@ -1,18 +1,13 @@
-import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
-import {
-  MODEL,
-  MissingApiKeyError,
-  createClient,
-  isConfigured,
-  withFriendlyErrors,
-} from "./anthropic";
+import { MissingApiKeyError } from "./anthropic-config";
 
-/// Macro estimation from natural language (spec §5.2). One of exactly two modules
-/// allowed to call the Anthropic API — the client itself lives in lib/anthropic.ts,
-/// which is how §11's "one place owns the API" survives a second, genuinely
-/// different use of it in lib/meal/generate.ts. Everything else goes through
-/// `estimateMacros`.
+/// The prompt, the schema and the deterministic library matching for macro
+/// estimation (spec §5.2).
+///
+/// Deliberately free of the Anthropic SDK: `resolveFromLibrary` is on the hot
+/// path of every log and must not drag 6.6MB of HTTP client with it. The call
+/// itself lives in ./nutrition-estimate, which the action loads only when a
+/// description actually misses the library.
 
 export { MissingApiKeyError };
 
@@ -33,7 +28,7 @@ const ItemSchema = z.object({
   confidence: z.enum(["high", "medium", "low"]),
 });
 
-const EstimateSchema = z.object({
+export const EstimateSchema = z.object({
   items: z.array(ItemSchema),
   clarification_needed: z
     .string()
@@ -95,45 +90,6 @@ export function buildSystemBlocks(savedFoods: SavedFoodForPrompt[]): SystemBlock
   if (library) blocks.push({ type: "text", text: library });
 
   return blocks;
-}
-
-/**
- * Estimates macros for a free-text meal description.
- *
- * Callers should try `resolveFromLibrary` first — a match there costs nothing and
- * is exactly right, so the model only ever sees genuinely novel meals (spec §5.3).
- */
-export async function estimateMacros(
-  description: string,
-  savedFoods: SavedFoodForPrompt[] = [],
-): Promise<MacroEstimate> {
-  if (!isConfigured()) {
-    throw new MissingApiKeyError("manual entry and your saved library still work without it.");
-  }
-
-  const client = createClient();
-
-  const response = await withFriendlyErrors(() => client.messages.parse({
-    model: MODEL,
-    max_tokens: 16000,
-    // Low effort: this is a short extraction, and the app's first principle is
-    // that logging must be faster than not logging (spec §1).
-    output_config: {
-      effort: "low",
-      format: zodOutputFormat(EstimateSchema),
-    },
-    system: buildSystemBlocks(savedFoods),
-    messages: [{ role: "user", content: description }],
-  }));
-
-  if (response.stop_reason === "refusal") {
-    throw new Error("The model declined to estimate that. Try rephrasing, or log it manually.");
-  }
-
-  const parsed = response.parsed_output;
-  if (!parsed) throw new Error("Could not read the estimate. Try again, or log it manually.");
-
-  return parsed;
 }
 
 /** Normalised form used for library matching: case, punctuation and spacing insensitive. */

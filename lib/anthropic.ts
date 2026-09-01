@@ -1,24 +1,19 @@
 import Anthropic from "@anthropic-ai/sdk";
 
-/// Spec §11 asks that one place own the Anthropic API. That was written when
-/// estimation was the only use for it; §8.3 adds a second, genuinely different
-/// one (generating candidate recipes). Rather than bolt recipes onto
-/// `estimateMacros`, the *client* lives here and there are exactly two callers:
-/// `lib/nutrition.ts` and `lib/meal/generate.ts`. Nothing else may construct one.
+/// The Anthropic client itself. **Importing this module pulls 6.6MB of SDK into
+/// whatever imports it**, so only the two modules that genuinely make API calls
+/// may do so, and both are loaded lazily by their callers:
+///
+///   lib/nutrition-estimate.ts   §5.2 macro estimation
+///   lib/meal/generate.ts        §8.3 recipe generation
+///
+/// Everything else — checking whether a key exists, catching a missing-key error
+/// — wants `./anthropic-config`, which carries no dependency at all.
+///
+/// This is how spec §11's "one place owns the API" survives two genuinely
+/// different uses of it.
 
-export const MODEL = "claude-opus-5";
-
-/** Thrown when no API key is configured, so the UI can point at the manual path. */
-export class MissingApiKeyError extends Error {
-  constructor(fallback: string) {
-    super(`No ANTHROPIC_API_KEY configured. Add it to .env — ${fallback}`);
-    this.name = "MissingApiKeyError";
-  }
-}
-
-export function isConfigured(): boolean {
-  return Boolean(process.env.ANTHROPIC_API_KEY);
-}
+export { MODEL, MissingApiKeyError, isConfigured } from "./anthropic-config";
 
 export function createClient(): Anthropic {
   const workspaceId = process.env.ANTHROPIC_WORKSPACE_ID;

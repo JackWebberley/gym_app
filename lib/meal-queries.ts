@@ -2,7 +2,7 @@ import { db } from "./db";
 import { todayKey, shiftDayKey } from "./day";
 import { buildEnvelopes, normaliseSplits, type HouseholdSettings } from "./meal/envelopes";
 import type { IngredientSpec, MealType, PantryStock, RecipeSpec } from "./meal/types";
-import { isConfigured } from "./anthropic";
+import { isConfigured } from "./anthropic-config";
 
 /// Read models for the meal screens. Everything that turns database rows into the
 /// plain shapes lib/meal works on lives here, so the pure modules never import

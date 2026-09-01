@@ -3,14 +3,14 @@
 import { revalidatePath } from "next/cache";
 import { db } from "./db";
 import { calorieTargetFor, isValidDayKey, type DayType } from "./day";
+import { estimateMacros } from "./nutrition-estimate";
 import {
-  MissingApiKeyError,
-  estimateMacros,
   normaliseFoodName,
   resolveFromLibrary,
   roundCalories,
   type EstimatedItem,
 } from "./nutrition";
+import { MissingApiKeyError } from "./anthropic-config";
 import { getGoals, getLibrary, getOrCreateDay } from "./nutrition-queries";
 
 /// Every nutrition mutation. Single user, so validation here is about catching
