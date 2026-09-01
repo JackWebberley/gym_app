@@ -66,8 +66,11 @@ describe("wasteWeight", () => {
     expect(wasteWeight(OIL)).toBe(0);
   });
 
-  it("barely charges something freezable", () => {
-    expect(wasteWeight(PEAS)).toBe(0.15);
+  it("charges a little for something short-lived that has to be frozen to survive", () => {
+    // Chicken keeps three days in the fridge. Freezing rescues most of the value
+    // but costs freezer space and a thawing decision later.
+    const chicken = ingredient({ id: "chicken", shelfLifeDays: 3, freezable: true });
+    expect(wasteWeight(chicken)).toBe(0.15);
   });
 
   it("charges a third for something that survives to next week", () => {
@@ -76,6 +79,29 @@ describe("wasteWeight", () => {
 
   it("charges the full value for something that spoils first", () => {
     expect(wasteWeight(BASIL)).toBe(1);
+  });
+
+  it("barely charges store-cupboard stock, which is inventory rather than waste", () => {
+    // A 500g jar of mayonnaise opened for 60g of use is not a £0.58 loss; the jar
+    // gets finished. Charging it as waste makes the optimiser avoid condiments.
+    const mayo = ingredient({ id: "mayo", aisle: "condiment", shelfLifeDays: 120 });
+    const tinned = ingredient({ id: "beans", aisle: "tinned", shelfLifeDays: 730 });
+    expect(wasteWeight(mayo)).toBe(0.05);
+    expect(wasteWeight(tinned)).toBe(0.05);
+  });
+
+  it("treats a bag of frozen peas as stock, not as waste", () => {
+    // Already frozen and good for months: the discriminator is whether a thing
+    // survives on its own, not which appliance it lives in.
+    expect(wasteWeight(PEAS)).toBe(0.05);
+  });
+
+  it("ranks the tiers the way the spec argues they should rank", () => {
+    const chicken = ingredient({ id: "chicken", shelfLifeDays: 3, freezable: true });
+    expect(wasteWeight(OIL)).toBeLessThan(wasteWeight(PEAS));
+    expect(wasteWeight(PEAS)).toBeLessThan(wasteWeight(chicken));
+    expect(wasteWeight(chicken)).toBeLessThan(wasteWeight(POTATO));
+    expect(wasteWeight(POTATO)).toBeLessThan(wasteWeight(BASIL));
   });
 
   it("is about perishability, not pack size", () => {

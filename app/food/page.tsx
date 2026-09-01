@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { formatDayKey, isValidDayKey, shiftDayKey, todayKey } from "@/lib/day";
 import { getDayScreen, isEstimationConfigured } from "@/lib/nutrition-queries";
+import { getPool } from "@/lib/meal-queries";
 import { PageHeader } from "@/components/ui";
 import { DayView } from "./day-view";
 
@@ -19,7 +20,7 @@ export default async function FoodPage({
   if (d && !isValidDayKey(d)) redirect("/food");
 
   const dayKey = d ?? today;
-  const day = await getDayScreen(dayKey);
+  const [day, pool] = await Promise.all([getDayScreen(dayKey), getPool(dayKey)]);
 
   const prev = shiftDayKey(dayKey, -1);
   const next = shiftDayKey(dayKey, 1);
@@ -54,7 +55,7 @@ export default async function FoodPage({
         }
       />
 
-      <DayView day={day} canEstimate={isEstimationConfigured()} />
+      <DayView day={day} canEstimate={isEstimationConfigured()} pool={pool} />
 
       <div className="grid grid-cols-2 gap-2 px-4 pt-5">
         <Link

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { markShopped, tickShoppingLine } from "@/lib/meal-actions";
 import type { ShoppingScreen } from "@/lib/meal-queries";
 import { describeQuantity, formatGrams } from "@/lib/meal/packs";
+import { WORTH_KEEPING_GRAMS } from "@/lib/meal/basket";
 import { Badge, Button, Card, Eyebrow, Hint, Note, SectionHeader, cx } from "@/components/ui";
 
 /// The shop, grouped by aisle, in pack units, with the leftover made explicit
@@ -91,7 +92,7 @@ export function ShoppingList({ list }: { list: ShoppingScreen }) {
                       NEED {describeQuantity(line.gramsNeeded, line.unitGrams)}
                       {line.priceGbp != null ? ` · £${line.priceGbp.toFixed(2)}` : ""}
                     </span>
-                    {line.surplusGrams > 0.5 ? (
+                    {line.surplusGrams >= WORTH_KEEPING_GRAMS ? (
                       <span className="mt-1 flex flex-wrap items-center gap-1.5">
                         <Badge tone={line.wasteCostGbp > 0.3 ? "warning" : "neutral"}>
                           {formatGrams(line.surplusGrams)} spare

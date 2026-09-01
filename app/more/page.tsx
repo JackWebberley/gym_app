@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { getGoals } from "@/lib/nutrition-queries";
+import { countMealLibrary, getCooksForTwo, getCurrentMenu } from "@/lib/meal-queries";
 import { Card, Eyebrow, PageHeader, SectionHeader } from "@/components/ui";
 import { ThemeToggle } from "@/components/theme-toggle";
 
@@ -55,15 +56,29 @@ function Group({ title, children }: { title: string; children: React.ReactNode }
 }
 
 export default async function MorePage() {
-  const [groupCount, cycleCount, exerciseCount, sessionCount, savedFoodCount, goals] =
-    await Promise.all([
-      db.exerciseGroup.count({ where: { isArchived: false } }),
-      db.cycle.count(),
-      db.exercise.count({ where: { isArchived: false } }),
-      db.session.count({ where: { endedAt: { not: null } } }),
-      db.savedFood.count(),
-      getGoals(),
-    ]);
+  const [
+    groupCount,
+    cycleCount,
+    exerciseCount,
+    sessionCount,
+    savedFoodCount,
+    goals,
+    counts,
+    menu,
+    cooksForTwo,
+  ] = await Promise.all([
+    db.exerciseGroup.count({ where: { isArchived: false } }),
+    db.cycle.count(),
+    db.exercise.count({ where: { isArchived: false } }),
+    db.session.count({ where: { endedAt: { not: null } } }),
+    db.savedFood.count(),
+    getGoals(),
+    countMealLibrary(),
+    getCurrentMenu(),
+    getCooksForTwo(),
+  ]);
+
+  const menuStatus = menu ? menu.status.toUpperCase() : "NONE";
 
   return (
     <main>
@@ -108,6 +123,36 @@ export default async function MorePage() {
           label="Food library"
           description="Saved foods, corrected once and matched instantly"
           meta={`${savedFoodCount}`}
+        />
+      </Group>
+
+      {/* Planning is a weekly job, not part of the daily loop, so it lives here
+          rather than in the tab bar. The servings it produces surface on Food,
+          which is where you are standing when you eat one. */}
+      <Group title="Meals">
+        <Row
+          href="/meals"
+          label="Meal planning"
+          description="A week's cooks and the shop that supplies them"
+          meta={menuStatus}
+        />
+        <Row
+          href="/meals/recipes"
+          label="Recipes"
+          description="What the planner picks from before generating anything"
+          meta={`${counts.recipes}`}
+        />
+        <Row
+          href="/meals/pantry"
+          label="Pantry"
+          description="Leftover stock, with expiry dates the planner reads"
+          meta={`${counts.pantry}`}
+        />
+        <Row
+          href="/meals/household"
+          label="Household"
+          description="Her targets and how a day divides across meals"
+          meta={cooksForTwo ? "2 EATING" : "1 EATING"}
         />
       </Group>
 

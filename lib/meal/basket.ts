@@ -45,6 +45,16 @@ export type Basket = {
   unknownIngredientIds: string[];
 };
 
+/// Beyond this, an ingredient is store-cupboard stock rather than something that
+/// might spoil: a jar, a tin, a bag of rice. The leftover is inventory, not waste.
+export const CUPBOARD_DAYS = 90;
+
+/// Below this a surplus is not worth a pantry row. Nobody tracks a spare gram of
+/// egg, and a list full of them buries the leftovers that matter. The shopping
+/// list and the shop-completion step share it so the list never promises a pantry
+/// entry that will not be created.
+export const WORTH_KEEPING_GRAMS = 10;
+
 /**
  * How much of a surplus is genuinely lost.
  *
@@ -53,12 +63,19 @@ export type Basket = {
  * nothing, because it keeps for a month and gets eaten. A 100g pack of fresh
  * basil bought for one recipe is a near-total loss. Conflating the two produces
  * bad plans — it makes the optimiser fight the potato bag and ignore the basil.
+ *
+ * The spec gives three tiers; this adds a fourth at the top. Its own data model
+ * anticipates shelf lives of "365 for tinned" (§8.2), and charging a 500g jar of
+ * mayonnaise 30% of its value because one recipe used 60g is simply wrong — that
+ * jar gets finished, and the pantry already tracks it as stock. Without this tier
+ * the optimiser quietly avoids every recipe with a condiment in it.
  */
 export function wasteWeight(
   ingredient: Pick<IngredientSpec, "isStaple" | "freezable" | "shelfLifeDays">,
   horizonDays = DEFAULT_HORIZON_DAYS,
 ): number {
   if (ingredient.isStaple) return 0;
+  if (ingredient.shelfLifeDays >= CUPBOARD_DAYS) return 0.05;
   if (ingredient.freezable) return 0.15;
   if (ingredient.shelfLifeDays >= horizonDays) return 0.3;
   return 1;

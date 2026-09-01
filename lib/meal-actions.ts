@@ -10,7 +10,7 @@ import {
   toRecipeSpec,
 } from "./meal-queries";
 import { solve, type LockedCook } from "./meal/optimiser";
-import { buildBasket } from "./meal/basket";
+import { WORTH_KEEPING_GRAMS, buildBasket } from "./meal/basket";
 import { ingredientNeeds, mergeNeeds, roundMacros, scaleForTarget, indexIngredients } from "./meal/portions";
 import { cheapestPacks } from "./meal/packs";
 import {
@@ -546,7 +546,7 @@ export async function markShopped(menuId: string) {
       }
     }
 
-    if (line.surplusGrams > 0.5 && !line.ingredient.isStaple) {
+    if (line.surplusGrams >= WORTH_KEEPING_GRAMS && !line.ingredient.isStaple) {
       await db.pantryItem.create({
         data: {
           ingredientId: line.ingredientId,

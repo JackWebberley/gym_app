@@ -241,6 +241,15 @@ export async function getMenuScreen(menuId: string) {
 
   const brief = safeParseBrief(menu.briefJson);
 
+  // A recipe that does not batch produces one cook per meal, so the same name
+  // appears several times. Numbering them ("cook 2 of 3") is the difference
+  // between that reading as intentional and reading as a bug.
+  const totalByRecipe = new Map<string, number>();
+  for (const cook of menu.cooks) {
+    totalByRecipe.set(cook.recipeId, (totalByRecipe.get(cook.recipeId) ?? 0) + 1);
+  }
+  const seenByRecipe = new Map<string, number>();
+
   return {
     id: menu.id,
     weekStart: menu.weekStart,
@@ -249,6 +258,9 @@ export async function getMenuScreen(menuId: string) {
     projectedWasteGbp: menu.projectedWasteGbp,
     brief,
     cooks: menu.cooks.map((cook) => {
+      const repeatTotal = totalByRecipe.get(cook.recipeId) ?? 1;
+      const repeatIndex = (seenByRecipe.get(cook.recipeId) ?? 0) + 1;
+      seenByRecipe.set(cook.recipeId, repeatIndex);
       const mine = cook.portions.filter((p) => p.eater === "me");
       const theirs = cook.portions.filter((p) => p.eater === "partner");
       return {
@@ -263,6 +275,10 @@ export async function getMenuScreen(menuId: string) {
         method: cook.recipe.method,
         isLocked: cook.isLocked,
         cookedAt: cook.cookedAt?.toISOString() ?? null,
+        /// Which of several separate cooks of the same dish this is, and how many
+        /// there are. Both 1 when the recipe appears once.
+        repeatIndex,
+        repeatTotal,
         servingsForMe: mine.length,
         servingsForPartner: theirs.length,
         eaten: cook.portions.filter((p) => p.status === "eaten").length,
