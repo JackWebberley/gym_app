@@ -176,7 +176,9 @@ describe("envelopes", () => {
 
   it("treats protein as a floor rather than a band", () => {
     const table = buildEnvelopes(settings);
-    expect(table.me.dinner.minProteinG).toBeCloseTo(160 * 0.28 * 0.85, 6);
+    // Near the full share of the day, not a generous discount — a floor a weak
+    // meal can clear is not doing any work.
+    expect(table.me.dinner.minProteinG).toBeCloseTo(160 * 0.28 * 0.95, 6);
     expect(table.me.dinner.maxKcal).toBeGreaterThan(table.me.dinner.targetKcal);
   });
 

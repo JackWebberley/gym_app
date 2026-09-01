@@ -36,8 +36,12 @@ export const WEIGHTS = {
   /// 100 kcal away from the envelope costs £0.40. Deliberately mild: the week's
   /// average is what matters and the day is noise (spec §5.4).
   gbpPerKcalDeviation: 0.004,
-  /// Protein is the target that actually gets missed, so a shortfall bites harder.
-  gbpPerProteinShortfallG: 0.05,
+  /// Protein is the whole point of the library, and it is the target that
+  /// actually gets missed. Steep for the same reason the variety floor is: at a
+  /// gentle rate a cheap low-protein dish simply buys its way past the floor —
+  /// a 21g dinner against a 38g floor cost £0.85 to include, which no amount of
+  /// being cheap should be able to cover. At this rate it costs £5 and loses.
+  gbpPerProteinShortfallG: 0.3,
   /// Each distinct recipe short of what was asked for. Steep on purpose: variety
   /// is the one number the *user* set, and repetition is always cheaper, so a
   /// mild penalty just gets bought out and the control stops meaning anything.

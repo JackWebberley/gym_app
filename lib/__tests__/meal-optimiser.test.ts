@@ -318,6 +318,31 @@ describe("solve", () => {
     expect(flexible.cooks.every((c) => c.recipeId === "robust")).toBe(true);
   });
 
+  it("will not let a cheap dish buy its way under the protein floor", () => {
+    // The failure this guards against is real: at a gentle shortfall rate the
+    // optimiser picked a 21g-protein curry over a 50g chilli because the curry
+    // was cheaper, and quietly dragged a whole week under target.
+    const cheapAndWeak = recipe({
+      id: "weak",
+      name: "Cheap low-protein dinner",
+      lines: [
+        { ingredientId: "rice", grams: 150, isScalable: true, minGrams: 100, maxGrams: 220 },
+        { ingredientId: "onion", grams: 120, isScalable: false, minGrams: null, maxGrams: null },
+      ],
+    });
+    const dearAndStrong = recipe({
+      id: "strong",
+      name: "Protein-led dinner",
+      lines: [
+        { ingredientId: "chicken", grams: 200, isScalable: true, minGrams: 140, maxGrams: 280 },
+        { ingredientId: "rice", grams: 70, isScalable: true, minGrams: 45, maxGrams: 110 },
+      ],
+    });
+
+    const solution = solve(input({ candidates: [cheapAndWeak, dearAndStrong] }));
+    expect(solution.cooks.every((c) => c.recipeId === "strong")).toBe(true);
+  });
+
   it("is deterministic for a seed and can be rerolled by changing it", () => {
     const a = solve(input({ candidates: [chickenRice, chickenOnionBake, basilTofu], seed: 5 }));
     const b = solve(input({ candidates: [chickenRice, chickenOnionBake, basilTofu], seed: 5 }));

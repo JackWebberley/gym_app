@@ -26,7 +26,13 @@ export type HouseholdSettings = {
 const TOLERANCE = 0.2;
 
 /// Protein is a floor rather than a band: a meal may exceed its share freely.
-const PROTEIN_FLOOR = 0.85;
+///
+/// Near-full share, not a generous discount. At 0.85 a breakfast carrying 28g
+/// against a 32g share cleared the floor and scored the same as one carrying 45g,
+/// so the optimiser took whichever was cheaper and the week drifted low. Tightened
+/// to 0.95 it costs about £0.80 a week and lifts the planned days by roughly 10g
+/// of protein a day, which is the trade the whole library exists to make.
+const PROTEIN_FLOOR = 0.95;
 
 export function splitFor(settings: HouseholdSettings, mealType: MealType): number {
   switch (mealType) {

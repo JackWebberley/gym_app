@@ -2,6 +2,8 @@ import "dotenv/config";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../generated/prisma/client.ts";
 import { INGREDIENTS } from "./seed-ingredients.ts";
+import { EXTENDED_INGREDIENTS } from "./seed-ingredients-extended.ts";
+import { HIGH_PROTEIN_RECIPES, type Line, type RecipeSeed } from "./seed-recipes.ts";
 
 /// Seeds the ingredient/pack library and a starter recipe set (spec §8.9).
 ///
@@ -15,32 +17,14 @@ if (!connectionString) throw new Error("Set DIRECT_URL (or DATABASE_URL) before 
 
 const db = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
 
-type Line = {
-  /** Ingredient name, exactly as seeded. */
-  n: string;
-  /** Grams for one base portion. */
-  g: number;
-  /** Scalable range, if the amount is one a person would actually adjust. */
-  scale?: [number, number];
-  note?: string;
-};
-
-type RecipeSeed = {
-  name: string;
-  mealType: "breakfast" | "lunch" | "dinner" | "snack";
-  prepMinutes: number;
-  batchFriendly?: boolean;
-  leftoversFreeze?: boolean;
-  keepsDays?: number;
-  method: string;
-  lines: Line[];
-};
-
 /// Deliberately overlapping: chicken, onions, rice, tinned tomatoes and spinach
 /// recur across several dishes so that even this small starter set gives the
 /// optimiser something real to find. A library of ten unrelated recipes cannot
 /// demonstrate ingredient economy, because there is no economy to find.
-const RECIPES: RecipeSeed[] = [
+///
+/// These are the original starter recipes. The 100 protein-led ones live in
+/// seed-recipes.ts and are seeded alongside them.
+const STARTER_RECIPES: RecipeSeed[] = [
   {
     name: "Chicken, rice and roasted veg",
     mealType: "dinner",
@@ -350,12 +334,15 @@ const RECIPES: RecipeSeed[] = [
   },
 ];
 
+const ALL_INGREDIENTS = [...INGREDIENTS, ...EXTENDED_INGREDIENTS];
+const ALL_RECIPES = [...STARTER_RECIPES, ...HIGH_PROTEIN_RECIPES];
+
 async function main() {
   // ── Ingredients and packs ────────────────────────────────────────────────
   let created = 0;
   let refreshed = 0;
 
-  for (const seed of INGREDIENTS) {
+  for (const seed of ALL_INGREDIENTS) {
     const existing = await db.ingredient.findUnique({
       where: { name: seed.name },
       include: { packs: true },
@@ -422,42 +409,67 @@ async function main() {
   const idByName = new Map(ingredients.map((i) => [i.name, i.id]));
 
   let recipesCreated = 0;
-  for (const seed of RECIPES) {
-    if (await db.recipe.findUnique({ where: { name: seed.name } })) continue;
+  let recipesRefreshed = 0;
+  let recipesLeftAlone = 0;
 
+  for (const seed of ALL_RECIPES) {
     const missing = seed.lines.filter((l) => !idByName.has(l.n));
     if (missing.length > 0) {
       console.warn(`Skipping "${seed.name}": unknown ingredients ${missing.map((m) => m.n).join(", ")}`);
       continue;
     }
 
-    await db.recipe.create({
-      data: {
-        name: seed.name,
-        mealType: seed.mealType,
-        prepMinutes: seed.prepMinutes,
-        method: seed.method,
-        batchFriendly: seed.batchFriendly ?? false,
-        leftoversFreeze: seed.leftoversFreeze ?? false,
-        keepsDays: seed.keepsDays ?? 3,
-        source: "seed",
-        items: {
-          create: seed.lines.map((line, order) => ({
-            ingredientId: idByName.get(line.n)!,
-            order,
-            grams: line.g,
-            isScalable: Boolean(line.scale),
-            minGrams: line.scale?.[0] ?? null,
-            maxGrams: line.scale?.[1] ?? null,
-            note: line.note ?? null,
-          })),
-        },
-      },
+    const fields = {
+      mealType: seed.mealType,
+      prepMinutes: seed.prepMinutes,
+      method: seed.method,
+      batchFriendly: seed.batchFriendly ?? false,
+      leftoversFreeze: seed.leftoversFreeze ?? false,
+      keepsDays: seed.keepsDays ?? 3,
+    };
+
+    const items = seed.lines.map((line, order) => ({
+      ingredientId: idByName.get(line.n)!,
+      order,
+      grams: line.g,
+      isScalable: Boolean(line.scale),
+      minGrams: line.scale?.[0] ?? null,
+      maxGrams: line.scale?.[1] ?? null,
+      note: line.note ?? null,
+    }));
+
+    const existing = await db.recipe.findUnique({ where: { name: seed.name } });
+
+    if (!existing) {
+      await db.recipe.create({
+        data: { name: seed.name, ...fields, source: "seed", items: { create: items } },
+      });
+      recipesCreated++;
+      continue;
+    }
+
+    // A recipe this file owns is reference data and gets refreshed, the same way
+    // ingredient nutrition does — otherwise correcting a gram figure here would
+    // never reach a database that had already been seeded. Anything the user
+    // wrote or the model generated is left completely alone.
+    if (existing.source !== "seed") {
+      recipesLeftAlone++;
+      continue;
+    }
+
+    await db.$transaction([
+      db.recipeIngredient.deleteMany({ where: { recipeId: existing.id } }),
+      db.recipe.update({ where: { id: existing.id }, data: fields }),
+    ]);
+    await db.recipeIngredient.createMany({
+      data: items.map((item) => ({ ...item, recipeId: existing.id })),
     });
-    recipesCreated++;
+    recipesRefreshed++;
   }
 
-  console.log(`Recipes: ${recipesCreated} created, ${RECIPES.length - recipesCreated} already present.`);
+  console.log(
+    `Recipes: ${recipesCreated} created, ${recipesRefreshed} refreshed, ${recipesLeftAlone} left alone (not seed-owned).`,
+  );
 }
 
 main()

@@ -15,7 +15,7 @@ cp .env.example .env # then paste your two Supabase connection strings
 npm run db:check     # proves both connections work before anything else
 npm run db:deploy    # applies migrations over the direct connection
 npm run db:seed      # 81 exercises + a Push/Pull/Legs starter cycle
-npm run db:seed:meals # 104 UK ingredients with pack sizes + 18 starter recipes
+npm run db:seed:meals # 206 UK ingredients with pack sizes + 118 recipes
 npm run dev
 ```
 
@@ -183,7 +183,38 @@ the week is. That becomes a slippage term: the less certain the week, the harder
 the optimiser leans on recipes that freeze and keep, so being wrong is cheap by
 construction.
 
-### Where the recipes come from
+### The recipe library
+
+118 recipes: 100 protein-led ones in `seed-recipes.ts` plus the original 18
+starters. The 100 follow three rules, each of which is enforced by a test in
+`lib/__tests__/meal-recipes.test.ts` rather than trusted:
+
+- **Protein first.** Every dinner clears 44g and every lunch 39g in a single base
+  portion, and at least a quarter of each dinner's calories come from protein.
+- **Every dinner contains meat**, and most lunches do. Fish, seafood, eggs and
+  dairy carry the variety alongside it — including in dinners, via dishes like
+  chorizo-and-prawn rice and bacon-wrapped cod, which get seafood onto the plate
+  without breaking the rule.
+- **Ingredients repeat on purpose.** 100 unrelated dishes would give the optimiser
+  no overlap to find, and overlap is the whole mechanism.
+
+That test suite also checks every ingredient name resolves, that base portions sit
+near their envelope, and — the one that actually caught something — that each
+recipe can shrink far enough to serve the smaller portion as well as the larger.
+Fourteen could not, because a single fixed component was holding the floor up.
+
+Two weights had to move once the library was in place, both for the same reason:
+a gentle penalty is a price, and the optimiser will happily pay it.
+
+| | was | now | why |
+|---|---|---|---|
+| Protein shortfall | £0.05/g | £0.30/g | A 21g-protein dinner cost £0.85 to include and won on price |
+| Per-meal protein floor | 0.85 × share | 0.95 × share | A 28g breakfast cleared a 32g-share floor and scored like a 45g one |
+
+Together they lifted a planned week from ~112g to ~135g of protein a day for about
+£0.80 more on the shop.
+
+### Where new recipes come from
 
 The library first, always. Claude is asked only for what the library genuinely
 cannot cover, and it is asked from a basket we chose — the pantry, plus the
