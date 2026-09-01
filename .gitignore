@@ -1,0 +1,31 @@
+node_modules
+# Keep environment variables out of version control
+.env
+
+/generated/prisma
+
+# Next.js
+.next
+next-env.d.ts
+
+# Local database
+*.db
+*.db-journal
+
+# Pre-Supabase SQLite snapshot
+.backup
+
+# Cloudflare build output
+.open-next
+
+# Cloudflare build output
+.wrangler
+
+# Vendored agent skill docs — third-party, re-installable via skills-lock.json
+# (npx skills add supabase/agent-skills). 293 files of vendor docs in a ~50 file app.
+.claude/skills/
+.agents/skills/
+.windsurf/skills/
+
+# TypeScript incremental build cache
+tsconfig.tsbuildinfo

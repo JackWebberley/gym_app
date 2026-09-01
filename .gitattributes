@@ -1,0 +1,7 @@
+# Normalise to LF everywhere. This is not cosmetic: Prisma checksums each
+# migration.sql by its bytes, and a CRLF conversion on checkout would make
+# `prisma migrate deploy` report already-applied migrations as modified.
+* text=auto eol=lf
+
+# The design system export is a one-off reference artifact; never diff or merge it.
+*.html -diff

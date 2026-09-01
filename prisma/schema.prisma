@@ -1,0 +1,215 @@
+// Gym + Nutrition Tracker.
+// Postgres (Supabase). The app connects through the pooled URL via a driver
+// adapter in lib/db.ts; the CLI migrates over the direct URL (see prisma7.config.ts).
+// Phase 2 adds the nutrition models at the bottom of this file.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// A movement. Seeded with a library of compound + isolation lifts; the user can add their own.
+model Exercise {
+  id           String  @id @default(cuid())
+  name         String  @unique
+  muscleGroup  String // chest, back, quads, hamstrings, glutes, delts, biceps, triceps, calves, core, forearms
+  equipment    String // barbell, dumbbell, cable, machine, bodyweight, smith
+  isUnilateral Boolean @default(false)
+  /// Setup reminders: "seat position 4, handle high". Shown inline while logging.
+  notes        String?
+  /// Rest timer default for this movement, in seconds.
+  restSeconds  Int     @default(120)
+  isCustom     Boolean @default(false)
+  isArchived   Boolean @default(false)
+
+  groupItems ExerciseGroupItem[]
+  sets       SetLog[]
+
+  @@index([muscleGroup])
+}
+
+/// A named, ordered set of exercises the user assembles — "Push", "Pull", "Legs".
+/// Called WorkoutTemplate in the spec; named for what the user calls it.
+model ExerciseGroup {
+  id         String   @id @default(cuid())
+  name       String
+  notes      String?
+  isArchived Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  items      ExerciseGroupItem[]
+  cycleSlots CycleSlot[]
+  sessions   Session[]
+}
+
+model ExerciseGroupItem {
+  id              String @id @default(cuid())
+  exerciseGroupId String
+  exerciseId      String
+  /// Position within the group. Not unique — reordering rewrites the whole set.
+  order           Int
+  targetSets      Int    @default(3)
+  targetRepMin    Int    @default(8)
+  targetRepMax    Int    @default(12)
+
+  group    ExerciseGroup @relation(fields: [exerciseGroupId], references: [id], onDelete: Cascade)
+  exercise Exercise      @relation(fields: [exerciseId], references: [id], onDelete: Restrict)
+
+  @@index([exerciseGroupId, order])
+  @@index([exerciseId])
+}
+
+/// An ordered rotation of exercise groups. A cycle, not a weekday schedule:
+/// skipping a session never shifts what comes next.
+model Cycle {
+  id        String   @id @default(cuid())
+  name      String
+  /// Exactly one cycle is active at a time; the home screen reads from it.
+  isActive  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  slots    CycleSlot[]
+  sessions Session[]
+}
+
+/// One position in a cycle's rotation.
+model CycleSlot {
+  id              String @id @default(cuid())
+  cycleId         String
+  exerciseGroupId String
+  position        Int
+
+  cycle    Cycle         @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  group    ExerciseGroup @relation(fields: [exerciseGroupId], references: [id], onDelete: Cascade)
+  sessions Session[]
+
+  @@index([cycleId, position])
+  @@index([exerciseGroupId])
+}
+
+/// One trip to the gym.
+model Session {
+  id              String    @id @default(cuid())
+  /// Null for a freestyle session with no group.
+  exerciseGroupId String?
+  cycleId         String?
+  /// Which slot in the rotation this session filled. Drives "what's next".
+  cycleSlotId     String?
+  startedAt       DateTime  @default(now())
+  /// Null while in progress. Only finished sessions advance the rotation.
+  endedAt         DateTime?
+  bodyweightKg    Float?
+  notes           String?
+
+  group     ExerciseGroup? @relation(fields: [exerciseGroupId], references: [id], onDelete: SetNull)
+  cycle     Cycle?         @relation(fields: [cycleId], references: [id], onDelete: SetNull)
+  cycleSlot CycleSlot?     @relation(fields: [cycleSlotId], references: [id], onDelete: SetNull)
+  sets      SetLog[]
+
+  @@index([startedAt])
+  @@index([endedAt])
+  @@index([exerciseGroupId])
+  @@index([cycleId])
+  @@index([cycleSlotId])
+}
+
+model SetLog {
+  id         String   @id @default(cuid())
+  sessionId  String
+  exerciseId String
+  setNumber  Int
+  weightKg   Float
+  reps       Int
+  rpe        Float?
+  isWarmup   Boolean  @default(false)
+  isFailure  Boolean  @default(false)
+  loggedAt   DateTime @default(now())
+
+  session  Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  exercise Exercise @relation(fields: [exerciseId], references: [id], onDelete: Restrict)
+
+  @@unique([sessionId, exerciseId, setNumber])
+  @@index([exerciseId, loggedAt])
+  @@index([sessionId])
+}
+
+/// ─────────────────────────────────────────────────────────────────────────────
+/// Phase 2 — Nutrition
+/// ─────────────────────────────────────────────────────────────────────────────
+
+/// Single-user app, so one row, always id "singleton".
+model Settings {
+  id                 String @id @default("singleton")
+  baseCalories       Int    @default(2400)
+  golfDayCalories    Int    @default(2800)
+  proteinTargetG     Int    @default(160)
+  /// Phase 4 (the feedback loop) reads these; nothing surfaces them yet.
+  weeklyLossTargetKg Float  @default(0.45)
+  heightCm           Int?
+}
+
+/// One calendar day of eating.
+model DayLog {
+  /// "YYYY-MM-DD" in local time. SQLite has no date type, and a timestamp would
+  /// push a 23:40 snack into the next day in UTC (spec §11) — a plain date string
+  /// cannot drift, and still sorts and range-queries correctly.
+  date          String @id
+  dayType       String @default("base") // "base" | "golf"
+  /// Snapshotted at creation, never derived. Changing your targets in three weeks
+  /// must not silently rewrite your history (spec §3).
+  calorieTarget Int
+  proteinTarget Int
+  weightKg      Float?
+  steps         Int?
+
+  entries FoodEntry[]
+}
+
+model FoodEntry {
+  id          String   @id @default(cuid())
+  dayLogDate  String
+  description String
+  calories    Int
+  proteinG    Float
+  carbsG      Float
+  fatG        Float
+  /// "llm" | "saved" | "manual" | "corrected"
+  source      String
+  confidence  String?
+  /// What the model assumed about portion size — surfaced so a 200 kcal mistake
+  /// is catchable in one glance (spec §5.1).
+  assumptions String?
+  savedFoodId String?
+  loggedAt    DateTime @default(now())
+
+  day       DayLog     @relation(fields: [dayLogDate], references: [date], onDelete: Cascade)
+  savedFood SavedFood? @relation(fields: [savedFoodId], references: [id], onDelete: SetNull)
+
+  @@index([dayLogDate])
+  @@index([savedFoodId])
+}
+
+/// The personal food library — the feature that makes this worth building (spec §5.3).
+/// A matching description resolves from here with no API call at all.
+model SavedFood {
+  id           String    @id @default(cuid())
+  /// Canonical, portion-inclusive: "protein shake (1 scoop, 300ml semi-skimmed)".
+  name         String    @unique
+  /// JSON array of phrasings that resolve here.
+  aliases      String    @default("[]")
+  calories     Int
+  proteinG     Float
+  carbsG       Float
+  fatG         Float
+  timesLogged  Int       @default(0)
+  lastLoggedAt DateTime?
+  createdAt    DateTime  @default(now())
+
+  entries FoodEntry[]
+
+  @@index([timesLogged])
+}

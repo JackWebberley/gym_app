@@ -1,0 +1,28 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "gym-tracker",
+  "main": ".open-next/worker.js",
+  // Must be >= the date OpenNext was built against; older dates change runtime
+  // behaviour under you.
+  "compatibility_date": "2026-08-01",
+  // nodejs_compat is not optional here: Prisma's pg adapter opens a real TCP
+  // socket to Postgres, and next/font, crypto and stream all need Node built-ins.
+  "compatibility_flags": ["nodejs_compat"],
+
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+
+  "observability": {
+    "enabled": true
+  },
+
+  // Secrets are NOT set here — they go in via `wrangler secret put`, which keeps
+  // them out of the repo. See README → Deploying.
+  //   DATABASE_URL
+  //   DIRECT_URL
+  //   ANTHROPIC_API_KEY
+  //   ANTHROPIC_WORKSPACE_ID   (only for an identity-linked key)
+  "vars": {}
+}
