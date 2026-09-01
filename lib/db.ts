@@ -1,44 +1,81 @@
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@/generated/prisma/client";
 
-/// Supabase gives two connection strings. The app uses the **pooled** one
-/// (Supavisor, port 6543) because serverless invocations open and drop
-/// connections constantly and would exhaust Postgres directly. Migrations and
-/// seeding use the **direct** one (port 5432) — see prisma7.config.ts.
+/// Connection strategy differs by runtime, and getting it wrong on Workers does
+/// not fail loudly — it hangs.
+///
+/// **Cloudflare Workers.** The connection string comes from the Hyperdrive
+/// binding: `pg` cannot complete the TLS handshake Supabase wants over the
+/// Workers socket shim ("Connection terminated unexpectedly"), and Hyperdrive
+/// terminates TLS itself. The client is also built **per request**. Workers
+/// forbid sharing I/O objects across requests — a socket opened while serving one
+/// request is dead by the next, and a module-level pool handing out that dead
+/// socket makes the Worker hang until the runtime cancels it. Hyperdrive does the
+/// real pooling upstream, so a fresh client per request is cheap.
+///
+/// **Everywhere else** — `next dev`, the seed, scripts — DATABASE_URL, with a
+/// module-level singleton so dev reloads do not leak a pool each time.
 
-function createClient() {
-  const connectionString = process.env.DATABASE_URL;
+type CloudflareContext = { env?: Record<string, unknown>; ctx?: object };
+type HyperdriveBinding = { connectionString?: string };
 
-  if (!connectionString) {
-    throw new Error(
-      "DATABASE_URL is not set. Copy .env.example to .env and paste your Supabase pooled connection string, then restart.",
-    );
+function cloudflareContext(): CloudflareContext | null {
+  try {
+    // Only resolvable inside a Worker request; throwing is the signal that we
+    // are not on Workers.
+    const { getCloudflareContext } = require("@opennextjs/cloudflare") as {
+      getCloudflareContext: () => CloudflareContext;
+    };
+    return getCloudflareContext() ?? null;
+  } catch {
+    return null;
   }
+}
 
+function createClient(connectionString: string, poolMax: number) {
   return new PrismaClient({
-    adapter: new PrismaPg({
-      connectionString,
-      // The pooler already multiplexes; a large per-instance pool on top of it
-      // just holds Supabase connections open for no benefit.
-      max: Number(process.env.DATABASE_POOL_MAX ?? 5),
-    }),
+    adapter: new PrismaPg({ connectionString, max: poolMax }),
   });
 }
 
-// Next dev reloads modules on every edit; without the global the process leaks
-// a connection pool per reload until Supabase starts refusing connections.
+// Keyed on the per-request ExecutionContext, so the client lives exactly as long
+// as the request whose I/O it owns and is collected with it.
+const perRequest = new WeakMap<object, ReturnType<typeof createClient>>();
+
 const globalForPrisma = globalThis as unknown as { prisma?: ReturnType<typeof createClient> };
 
 function client(): ReturnType<typeof createClient> {
-  if (!globalForPrisma.prisma) globalForPrisma.prisma = createClient();
+  const cf = cloudflareContext();
+  const hyperdrive = cf?.env?.HYPERDRIVE as HyperdriveBinding | undefined;
+
+  if (cf && hyperdrive?.connectionString) {
+    const key = cf.ctx ?? cf;
+    const existing = perRequest.get(key);
+    if (existing) return existing;
+
+    // One connection per request: Hyperdrive pools on the other side, and a
+    // larger pool here would just open sockets this request cannot outlive.
+    const fresh = createClient(hyperdrive.connectionString, 1);
+    perRequest.set(key, fresh);
+    return fresh;
+  }
+
+  if (!globalForPrisma.prisma) {
+    const url = process.env.DATABASE_URL;
+    if (!url) {
+      throw new Error(
+        "No database connection available. Locally: copy .env.example to .env and set DATABASE_URL. On Workers: check the HYPERDRIVE binding in wrangler.jsonc.",
+      );
+    }
+    globalForPrisma.prisma = createClient(url, Number(process.env.DATABASE_POOL_MAX ?? 5));
+  }
   return globalForPrisma.prisma;
 }
 
 /**
- * Connects on first use rather than at import. `next build` imports every route
- * module to collect page data, so constructing eagerly would make the build fail
- * on a machine with no credentials — and in production a missing variable should
- * surface as one clear failed request, not a server that will not boot.
+ * Resolves on first use rather than at import: `next build` imports every route
+ * module to collect page data, and the Hyperdrive binding only exists inside a
+ * request, not at module scope.
  */
 export const db = new Proxy({} as ReturnType<typeof createClient>, {
   get(_target, property) {

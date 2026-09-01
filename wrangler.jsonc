@@ -9,10 +9,33 @@
   // socket to Postgres, and next/font, crypto and stream all need Node built-ins.
   "compatibility_flags": ["nodejs_compat"],
 
+  // Only /gym* reaches this Worker; the rest of jackwebberley.com is untouched.
+  "routes": [
+    {
+      "pattern": "jackwebberley.com/gym*",
+      "zone_name": "jackwebberley.com"
+    },
+    {
+      "pattern": "www.jackwebberley.com/gym*",
+      "zone_name": "jackwebberley.com"
+    }
+  ],
+
   "assets": {
     "directory": ".open-next/assets",
     "binding": "ASSETS"
   },
+
+  // Hyperdrive pools Postgres connections at Cloudflare's edge and terminates TLS
+  // to Supabase itself. Workers cannot do the TLS handshake pg expects over the
+  // socket shim, and every isolate opening its own connection would exhaust
+  // Supabase's limit anyway.
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "a4edfa75732c4b3cb1e12953b6dd6324"
+    }
+  ],
 
   "observability": {
     "enabled": true

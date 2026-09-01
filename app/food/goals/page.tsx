@@ -16,7 +16,7 @@ export default async function GoalsPage() {
         subtitle="What each day aims at. Golf days get their own calorie figure."
         action={
           <Link href="/food" className="shrink-0 text-caption">
-            Back to today
+            ← Food log
           </Link>
         }
       />

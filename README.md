@@ -120,6 +120,16 @@ the entry `corrected` and *does* replace them, because a correction is the
 strongest signal about what you actually eat. Your six most-logged foods sit on
 the day screen as one-tap buttons.
 
+## Access
+
+The whole app sits behind a passcode (spec §10 — one user, a passphrase is
+enough). `middleware.ts` gates every route, so an unauthenticated request never
+reaches the database. The passcode is **not in the repo**: it comes from
+`APP_PASSCODE`, with `AUTH_SECRET` signing the session cookie.
+
+The cookie is HttpOnly, scoped to `/gym`, and its signature covers the expiry so
+it cannot be extended by hand. Sessions last 90 days.
+
 ## Deploying (Cloudflare Workers)
 
 Built with [`@opennextjs/cloudflare`](https://opennext.js.org/cloudflare). In the
@@ -140,6 +150,16 @@ Secrets (Settings -> Variables and Secrets, as **Secret**, not plaintext):
 - `ANTHROPIC_API_KEY` - only needed for chat macro estimation
 - `ANTHROPIC_WORKSPACE_ID` - only for an identity-linked key
 
+Served at **https://www.jackwebberley.com/gym**. `basePath: "/gym"` in
+`next.config.ts` prefixes every route and asset; the Worker routes in
+`wrangler.jsonc` match only `/gym*`, leaving the rest of the site untouched.
+
+Postgres reaches Supabase through a **Hyperdrive** binding — `pg` cannot complete
+the TLS handshake over the Workers socket shim, and Hyperdrive also pools so each
+isolate does not open its own connection. The Prisma client is built per request:
+Workers forbid sharing sockets across requests, and a cached client hands out a
+dead one, which hangs until the runtime cancels it.
+
 `nodejs_compat` is set in `wrangler.jsonc` and is not optional: Prisma's `pg`
 adapter opens a real TCP socket to Postgres.
 
@@ -149,10 +169,19 @@ Cloudflare builders run Linux and are unaffected.
 
 ## Layout
 
+The tab bar carries the daily loop and nothing else — **Today**, **Train**,
+**Food**, **More**. Today is the dashboard: where you are against the day's
+protein and calorie targets, and the next session in the rotation, both
+actionable in place. Train is the full rotation view. Everything you set up once
+and rarely revisit — groups, cycles, the exercise library, goals, the food
+library, history — lives behind More.
+
 ```
 app/
-  page.tsx                    home — what is next, one tap to start
+  page.tsx                    Today — the dashboard: food targets + next session
+  train/                      the rotation: what is next, what follows, quick starts
   train/[sessionId]/          the logging screen + rest timer
+  more/                       hub for setup, libraries and history
   groups/                     create and edit exercise groups
   cycles/                     order groups into a rotation
   exercises/                  library, custom exercises, notes, rest defaults
@@ -161,6 +190,7 @@ app/
   food/goals/                 calorie and protein targets
   food/library/               saved foods, aliases, corrections
 lib/
+  relative-day.ts             "yesterday", "3 days ago" — shared by Today and Train
   progression.ts              §4.3 progression cues — pure, rule-based, tested
   rotation.ts                 §4.1 what comes next — pure, tested
   prefill.ts                  §4.2 prefill from last time — pure, tested
@@ -189,8 +219,9 @@ for months if it were wrong, which is why they are the only things with tests
   mirrors its component library (Button, Card, Tag, Badge, Input, Select) with the
   same variants and sizes. Fonts are Schibsted Grotesk, Instrument Serif (display
   headings) and JetBrains Mono (numerals, tags), self-hosted via `next/font`.
-- Light is the default, matching the system's `:root`; the toggle on the home screen
-  switches to its `[data-theme="dark"]` block and the first load follows the device.
+- Light is the default, matching the system's `:root`; the toggle on Today (and
+  under More → Appearance) switches to its `[data-theme="dark"]` block, and the
+  first load follows the device.
 - Not yet built from Phase 1's scope in the spec: PWA install and offline
   logging, and the 1RM-over-time and volume-per-muscle-group charts (spec §4.4
   puts those in Phase 5).

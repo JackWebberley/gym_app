@@ -25,7 +25,7 @@ export default async function LibraryPage() {
         subtitle="Everything you log is saved here. A match resolves instantly, with no API call — correct it once and it stays correct."
         action={
           <Link href="/food" className="shrink-0 text-caption">
-            Back to today
+            ← Food log
           </Link>
         }
       />

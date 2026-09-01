@@ -287,3 +287,118 @@ export function Note({
     </div>
   );
 }
+
+/** Eyebrow plus an optional trailing link, the standard heading above a section. */
+export function SectionHeader({
+  title,
+  action,
+  className,
+}: {
+  title: string;
+  action?: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={cx("mb-2.5 flex items-baseline justify-between gap-3", className)}>
+      <Eyebrow>{title}</Eyebrow>
+      {action}
+    </div>
+  );
+}
+
+/* ── Meter ───────────────────────────────────────────────────────────────── */
+
+/**
+ * A target and how far through it you are. Shared by the daily food view and the
+ * home dashboard so "1,240 left" means the same thing, and is styled the same
+ * way, in both places.
+ *
+ * `prominent` leads with the number still owed rather than the running total —
+ * on the dashboard that figure is the whole reason you opened the app.
+ */
+export function Meter({
+  label,
+  consumed,
+  target,
+  left,
+  fraction,
+  isOver,
+  unit = "",
+  overIsGood = false,
+  prominent = false,
+  className,
+}: {
+  label: string;
+  consumed: number;
+  target: number;
+  left: number;
+  fraction: number;
+  isOver: boolean;
+  unit?: string;
+  /** Protein is a floor, not a ceiling: going past it is the point. */
+  overIsGood?: boolean;
+  prominent?: boolean;
+  className?: string;
+}) {
+  const rounded = Math.round(consumed);
+  const leftRounded = Math.round(Math.abs(left));
+  const bad = isOver && !overIsGood;
+
+  const bar = (
+    <div className="h-2 overflow-hidden rounded-pill bg-sunken">
+      <div
+        className={cx(
+          "h-full rounded-pill transition-[width] duration-(--dur-base) ease-(--ease-out)",
+          bad ? "bg-warning" : "bg-accent",
+        )}
+        style={{ width: `${fraction * 100}%` }}
+      />
+    </div>
+  );
+
+  if (prominent) {
+    return (
+      <div className={className}>
+        <p className="text-micro font-medium tracking-caps text-fg-muted uppercase">
+          {label} {isOver ? "over" : "left"}
+        </p>
+        <p
+          className={cx(
+            "mt-1 font-mono text-h2 leading-none tracking-tight tabular-nums",
+            bad ? "text-warning" : "text-fg-strong",
+          )}
+        >
+          {leftRounded.toLocaleString("en-GB")}
+          <span className="text-body-sm text-fg-faint">{unit}</span>
+        </p>
+        <div className="mt-2.5">{bar}</div>
+        <p className="mt-1.5 font-mono text-micro tracking-wide text-fg-faint tabular-nums">
+          {rounded.toLocaleString("en-GB")} / {target.toLocaleString("en-GB")}
+          {unit}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className={cx("mt-4", className)}>
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-body-sm font-medium text-fg-strong">{label}</span>
+        <span className="font-mono text-body-sm text-fg tabular-nums">
+          {rounded.toLocaleString("en-GB")}
+          {unit} / {target.toLocaleString("en-GB")}
+          {unit}
+        </span>
+      </div>
+      <div className="mt-1.5">{bar}</div>
+      <p
+        className={cx(
+          "mt-1 font-mono text-micro tracking-wide tabular-nums",
+          bad ? "text-warning" : "text-fg-faint",
+        )}
+      >
+        {isOver ? `${leftRounded}${unit} OVER` : `${leftRounded}${unit} LEFT`}
+      </p>
+    </div>
+  );
+}

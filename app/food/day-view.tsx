@@ -12,7 +12,20 @@ import {
   type ConfirmedItem,
 } from "@/lib/nutrition-actions";
 import type { DayScreen } from "@/lib/nutrition-queries";
-import { Badge, Button, Card, Eyebrow, Hint, Input, Label, Note, Tag, cx } from "@/components/ui";
+import {
+  Badge,
+  Button,
+  Card,
+  Eyebrow,
+  Hint,
+  Input,
+  Label,
+  Meter,
+  Note,
+  SectionHeader,
+  Tag,
+  cx,
+} from "@/components/ui";
 
 type Draft = ConfirmedItem & { key: string };
 
@@ -141,25 +154,8 @@ export function DayView({ day, canEstimate }: { day: DayScreen; canEstimate: boo
 
         {/* Protein first: it is the harder target to hit and the one that matters
             most while cutting (spec §5.4). */}
-        <Meter
-          label="Protein"
-          consumed={day.protein.consumed}
-          target={day.protein.target}
-          left={day.protein.left}
-          fraction={day.protein.fraction}
-          isOver={day.protein.isOver}
-          unit="g"
-          overIsGood
-        />
-        <Meter
-          label="Calories"
-          consumed={day.calories.consumed}
-          target={day.calories.target}
-          left={day.calories.left}
-          fraction={day.calories.fraction}
-          isOver={day.calories.isOver}
-          unit=""
-        />
+        <Meter label="Protein" unit="g" overIsGood {...day.protein} />
+        <Meter label="Calories" {...day.calories} />
 
         <p className="mt-4 font-mono text-micro tracking-wide text-fg-faint">
           CARBS {Math.round(day.totals.carbsG)}g · FAT {Math.round(day.totals.fatG)}g
@@ -325,12 +321,14 @@ export function DayView({ day, canEstimate }: { day: DayScreen; canEstimate: boo
       {/* ── Quick add ───────────────────────────────────────────────────── */}
       {day.quickAdd.length > 0 ? (
         <section>
-          <div className="mb-2.5 flex items-baseline justify-between">
-            <Eyebrow>Quick add</Eyebrow>
-            <Link href="/food/library" className="text-caption">
-              Library ({day.libraryCount})
-            </Link>
-          </div>
+          <SectionHeader
+            title="Quick add"
+            action={
+              <Link href="/food/library" className="text-caption">
+                Library ({day.libraryCount})
+              </Link>
+            }
+          />
           <div className="flex flex-wrap gap-2">
             {day.quickAdd.map((food) => (
               <Button
@@ -355,7 +353,7 @@ export function DayView({ day, canEstimate }: { day: DayScreen; canEstimate: boo
 
       {/* ── Today's entries ─────────────────────────────────────────────── */}
       <section>
-        <Eyebrow className="mb-2.5">Logged ({day.entries.length})</Eyebrow>
+        <SectionHeader title={`Logged (${day.entries.length})`} />
         {day.entries.length === 0 ? (
           <p className="rounded-lg border border-dashed border-line px-4 py-6 text-center text-body-sm text-fg-muted">
             Nothing logged yet today.
@@ -398,61 +396,6 @@ export function DayView({ day, canEstimate }: { day: DayScreen; canEstimate: boo
           </ul>
         )}
       </section>
-    </div>
-  );
-}
-
-function Meter({
-  label,
-  consumed,
-  target,
-  left,
-  fraction,
-  isOver,
-  unit,
-  overIsGood = false,
-}: {
-  label: string;
-  consumed: number;
-  target: number;
-  left: number;
-  fraction: number;
-  isOver: boolean;
-  unit: string;
-  overIsGood?: boolean;
-}) {
-  const rounded = Math.round(consumed);
-  const leftRounded = Math.round(Math.abs(left));
-
-  return (
-    <div className="mt-4">
-      <div className="flex items-baseline justify-between gap-3">
-        <span className="text-body-sm font-medium text-fg-strong">{label}</span>
-        <span className="font-mono text-body-sm text-fg">
-          {rounded.toLocaleString("en-GB")}
-          {unit} / {target.toLocaleString("en-GB")}
-          {unit}
-        </span>
-      </div>
-      <div className="mt-1.5 h-2 overflow-hidden rounded-pill bg-sunken">
-        <div
-          className={cx(
-            "h-full rounded-pill transition-[width] duration-(--dur-base) ease-(--ease-out)",
-            isOver && !overIsGood ? "bg-warning" : "bg-accent",
-          )}
-          style={{ width: `${fraction * 100}%` }}
-        />
-      </div>
-      <p
-        className={cx(
-          "mt-1 font-mono text-micro tracking-wide",
-          isOver && !overIsGood ? "text-warning" : "text-fg-faint",
-        )}
-      >
-        {isOver
-          ? `${leftRounded}${unit} OVER`
-          : `${leftRounded}${unit} LEFT`}
-      </p>
     </div>
   );
 }

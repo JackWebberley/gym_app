@@ -49,6 +49,7 @@ export async function saveGoals(input: {
 
   // Deliberately does not touch existing days: their targets are snapshots.
   revalidatePath("/food");
+  revalidatePath("/");
   revalidatePath("/food/goals");
 }
 
@@ -69,6 +70,7 @@ export async function setDayType(dayKey: string, dayType: DayType) {
   });
 
   revalidatePath("/food");
+  revalidatePath("/");
 }
 
 // ── Estimation ────────────────────────────────────────────────────────────────
@@ -219,6 +221,7 @@ export async function logItems(input: {
   }
 
   revalidatePath("/food");
+  revalidatePath("/");
 }
 
 /** One tap from the quick-add row or the library — no API call, no estimation error. */
@@ -250,11 +253,13 @@ export async function logSavedFood(input: { dayKey: string; savedFoodId: string 
   ]);
 
   revalidatePath("/food");
+  revalidatePath("/");
 }
 
 export async function deleteEntry(entryId: string) {
   await db.foodEntry.delete({ where: { id: entryId } }).catch(() => {});
   revalidatePath("/food");
+  revalidatePath("/");
 }
 
 // ── Library ───────────────────────────────────────────────────────────────────
@@ -281,6 +286,7 @@ export async function updateSavedFood(input: {
   await db.savedFood.update({ where: { id: input.id }, data });
   revalidatePath("/food/library");
   revalidatePath("/food");
+  revalidatePath("/");
 }
 
 export async function addAlias(input: { id: string; alias: string }) {
@@ -312,5 +318,6 @@ export async function deleteSavedFood(id: string) {
   await db.savedFood.delete({ where: { id } }).catch(() => {});
   revalidatePath("/food/library");
   revalidatePath("/food");
+  revalidatePath("/");
 }
 

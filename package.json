@@ -16,9 +16,9 @@
     "postinstall": "prisma generate",
     "db:check": "tsx scripts/check-db.ts",
     "db:deploy": "prisma migrate deploy",
-    "cf:build": "opennextjs-cloudflare build",
+    "cf:build": "node scripts/cf-build.mjs",
     "cf:preview": "opennextjs-cloudflare preview",
-    "cf:deploy": "opennextjs-cloudflare deploy"
+    "cf:deploy": "node scripts/cf-build.mjs && opennextjs-cloudflare deploy"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.122.0",

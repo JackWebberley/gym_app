@@ -47,12 +47,14 @@ export async function finishSession(sessionId: string) {
     await db.session.update({ where: { id: sessionId }, data: { endedAt: new Date() } });
   }
   revalidatePath("/");
+  revalidatePath("/train");
   redirect("/");
 }
 
 export async function discardSession(sessionId: string) {
   await db.session.delete({ where: { id: sessionId } });
   revalidatePath("/");
+  revalidatePath("/train");
   redirect("/");
 }
 
@@ -140,6 +142,7 @@ export async function createExerciseGroup(name: string) {
   const group = await db.exerciseGroup.create({ data: { name: trimmed } });
   revalidatePath("/groups");
   revalidatePath("/");
+  revalidatePath("/train");
   redirect(`/groups/${group.id}`);
 }
 
@@ -185,6 +188,7 @@ export async function saveExerciseGroup(input: {
   revalidatePath(`/groups/${input.id}`);
   revalidatePath("/cycles");
   revalidatePath("/");
+  revalidatePath("/train");
 }
 
 export async function deleteExerciseGroup(id: string) {
@@ -199,6 +203,7 @@ export async function deleteExerciseGroup(id: string) {
   revalidatePath("/groups");
   revalidatePath("/cycles");
   revalidatePath("/");
+  revalidatePath("/train");
   redirect("/groups");
 }
 
@@ -238,6 +243,7 @@ export async function saveCycle(input: { id: string; name: string; exerciseGroup
   revalidatePath("/cycles");
   revalidatePath(`/cycles/${input.id}`);
   revalidatePath("/");
+  revalidatePath("/train");
 }
 
 /**
@@ -268,6 +274,7 @@ export async function moveCycleSlot(input: { cycleSlotId: string; direction: "up
   revalidatePath("/cycles");
   revalidatePath(`/cycles/${slot.cycleId}`);
   revalidatePath("/");
+  revalidatePath("/train");
 }
 
 export async function activateCycle(id: string) {
@@ -277,6 +284,7 @@ export async function activateCycle(id: string) {
   ]);
   revalidatePath("/cycles");
   revalidatePath("/");
+  revalidatePath("/train");
 }
 
 export async function deleteCycle(id: string) {
@@ -288,6 +296,7 @@ export async function deleteCycle(id: string) {
   }
   revalidatePath("/cycles");
   revalidatePath("/");
+  revalidatePath("/train");
   redirect("/cycles");
 }
 
