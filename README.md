@@ -120,6 +120,33 @@ the entry `corrected` and *does* replace them, because a correction is the
 strongest signal about what you actually eat. Your six most-logged foods sit on
 the day screen as one-tap buttons.
 
+## Deploying (Cloudflare Workers)
+
+Built with [`@opennextjs/cloudflare`](https://opennext.js.org/cloudflare). In the
+Cloudflare dashboard, under Settings -> Build:
+
+| Field | Value |
+|---|---|
+| Build command | `npx opennextjs-cloudflare build` |
+| Deploy command | `npx opennextjs-cloudflare deploy` |
+
+Both are required. Setting only the deploy command fails with
+`Could not find compiled Open Next config` — there is no build output to ship.
+
+Secrets (Settings -> Variables and Secrets, as **Secret**, not plaintext):
+
+- `DATABASE_URL` - Supabase transaction pooler, port 6543
+- `DIRECT_URL` - Supabase session pooler, port 5432
+- `ANTHROPIC_API_KEY` - only needed for chat macro estimation
+- `ANTHROPIC_WORKSPACE_ID` - only for an identity-linked key
+
+`nodejs_compat` is set in `wrangler.jsonc` and is not optional: Prisma's `pg`
+adapter opens a real TCP socket to Postgres.
+
+Building locally on Windows needs Developer Mode enabled — OpenNext creates
+symlinks while tracing dependencies, which otherwise fails with `EPERM`. The
+Cloudflare builders run Linux and are unaffected.
+
 ## Layout
 
 ```
