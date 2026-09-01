@@ -154,6 +154,21 @@ model Settings {
   /// Phase 4 (the feedback loop) reads these; nothing surfaces them yet.
   weeklyLossTargetKg Float  @default(0.45)
   heightCm           Int?
+
+  /// ── Household (spec §8, adapted) ──────────────────────────────────────────
+  /// Meals are cooked for two. Her figures size the shop and scale her half of
+  /// each dish; they never touch a DayLog, which stays single-user.
+  cooksForTwo     Boolean @default(true)
+  partnerCalories Int     @default(1700)
+  partnerProteinG Int     @default(110)
+
+  /// How a day's calories divide across meals. The planner fits recipes to the
+  /// envelope a meal type earns rather than to a particular day, because a
+  /// portion in the pool can be eaten on any of them. Must sum to 1.
+  splitBreakfast Float @default(0.2)
+  splitLunch     Float @default(0.26)
+  splitDinner    Float @default(0.28)
+  splitSnack     Float @default(0.26)
 }
 
 /// One calendar day of eating.
@@ -216,4 +231,262 @@ model SavedFood {
   entries FoodEntry[]
 
   @@index([timesLogged])
+}
+
+/// ─────────────────────────────────────────────────────────────────────────────
+/// Phase 6/7 — Meal planning and ingredient economy (spec §8)
+///
+/// The spec pins every planned meal to a date. This build does not: cooking here
+/// is shared between two people and genuinely irregular, and a dated plan is
+/// wrong by Tuesday. A Menu is instead a set of cooks with serving counts, and
+/// the servings sit in a pool until somebody eats them. The shop is the
+/// commitment; the calendar is not.
+/// ─────────────────────────────────────────────────────────────────────────────
+
+/// A shoppable thing, with the pack sizes it is actually sold in. The optimiser is
+/// only ever as good as this table (spec §8.9).
+model Ingredient {
+  id            String  @id @default(cuid())
+  name          String  @unique
+  /// produce, meat, fish, dairy, bakery, dry, tinned, frozen, condiment
+  aisle         String
+  /// Oil, salt, spices — assumed present, never costed, never shopped for.
+  isStaple      Boolean @default(false)
+  /// Days it keeps once bought. Drives the waste weighting, which is about
+  /// perishability rather than pack size (spec §8.4).
+  shelfLifeDays Int
+  freezable     Boolean @default(false)
+  /// 1 medium onion = 110g. Null when sold by weight only.
+  unitGrams     Float?
+
+  /// Spec §8.2 models these as one Json blob. Four columns instead: they are
+  /// summed on every optimiser pass, and Json would mean parsing on every read.
+  kcalPer100g    Float
+  proteinPer100g Float
+  carbsPer100g   Float
+  fatPer100g     Float
+
+  /// Set when a generated recipe named something we hold no pack data for. The
+  /// planner still runs; the ingredient reaches the shopping list flagged for a
+  /// one-time "what pack sizes does this come in?" (spec §8.9).
+  needsReview Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  packs         PackSize[]
+  recipeLines   RecipeIngredient[]
+  pantryItems   PantryItem[]
+  shoppingLines ShoppingLine[]
+
+  @@index([aisle])
+  @@index([needsReview])
+}
+
+/// How an ingredient is sold. Several rows per ingredient is the point — the
+/// optimiser picks between a 300g pack and a 650g pack.
+model PackSize {
+  id           String  @id @default(cuid())
+  ingredientId String
+  /// "650g pack", "loose", "pack of 3"
+  label        String
+  grams        Float
+  priceGbp     Float?
+  /// Loose potatoes: buy exactly what the week needs, so surplus is always zero.
+  isDivisible  Boolean @default(false)
+
+  ingredient    Ingredient     @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
+  shoppingLines ShoppingLine[]
+
+  @@index([ingredientId])
+}
+
+/// One dish, defined per *base portion* — a 1.0 scale factor. Two people eating
+/// different amounts of it is handled by giving each portion its own scale
+/// factor, not by storing the dish twice.
+model Recipe {
+  id              String    @id @default(cuid())
+  name            String    @unique
+  /// breakfast | lunch | dinner | snack
+  mealType        String
+  prepMinutes     Int       @default(30)
+  /// Markdown.
+  method          String    @default("")
+  isFavourite     Boolean   @default(false)
+  isArchived      Boolean   @default(false)
+  timesCooked     Int       @default(0)
+  /// One cook fills several servings — the single most effective waste reducer
+  /// available (spec §8.6).
+  batchFriendly   Boolean   @default(false)
+  /// Cooked portions freeze. This is what lets a cook survive a change of plan,
+  /// so the optimiser weights it by how unreliable the week is expected to be.
+  leftoversFreeze Boolean   @default(false)
+  /// How long a cooked portion keeps in the fridge. Sets the pool expiry.
+  keepsDays       Int       @default(3)
+  /// seed | manual | llm
+  source          String    @default("manual")
+  createdAt       DateTime  @default(now())
+  lastCookedAt    DateTime?
+
+  items RecipeIngredient[]
+  cooks MenuCook[]
+
+  @@index([mealType])
+  @@index([isArchived])
+}
+
+model RecipeIngredient {
+  id           String  @id @default(cuid())
+  recipeId     String
+  ingredientId String
+  order        Int     @default(0)
+  /// Grams for one base portion.
+  grams        Float
+  /// Scalable lines are what let one dish cover 550–900 kcal without becoming a
+  /// different meal (spec §8.5). Fixed lines still multiply per portion — cooking
+  /// for two takes twice the oil.
+  isScalable   Boolean @default(false)
+  minGrams     Float?
+  maxGrams     Float?
+  /// "dry weight", "diced"
+  note         String?
+
+  recipe     Recipe     @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  ingredient Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+
+  @@unique([recipeId, ingredientId])
+  @@index([recipeId, order])
+  @@index([ingredientId])
+}
+
+/// What is already in the house. The feature that compounds: 80g of leftover feta
+/// with an expiry date is what makes week three cheaper than week one (spec §8.2).
+model PantryItem {
+  id           String   @id @default(cuid())
+  ingredientId String
+  grams        Float
+  /// "YYYY-MM-DD", the same convention as DayLog — a pantry item expires on a
+  /// calendar day, not at an instant (spec §11).
+  expiresOn    String
+  /// surplus | leftover | manual
+  source       String   @default("manual")
+  createdAt    DateTime @default(now())
+
+  ingredient Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
+
+  @@index([ingredientId])
+  @@index([expiresOn])
+}
+
+/// A week of cooking: a set of cooks and the shop that supplies them. Nothing
+/// inside it carries a date.
+model Menu {
+  id        String @id @default(cuid())
+  /// Day key of the Monday this menu was planned for. A label only — no cook is
+  /// bound to a day.
+  weekStart String
+  /// draft | confirmed | shopped
+  status    String @default("draft")
+  /// The brief it was solved against, so a reroll re-solves the same question.
+  briefJson String @default("{}")
+
+  /// The optimiser readout at solve time, kept so the review screen never has to
+  /// re-solve in order to show its own numbers.
+  estimatedCostGbp  Float @default(0)
+  projectedWasteGbp Float @default(0)
+
+  createdAt   DateTime  @default(now())
+  confirmedAt DateTime?
+  shoppedAt   DateTime?
+
+  cooks         MenuCook[]
+  shoppingLines ShoppingLine[]
+
+  @@index([weekStart])
+  @@index([status])
+}
+
+/// One recipe, cooked once. It carries however many portions hang off it — a
+/// batch cook is one MenuCook with six portions, not six cooks (spec §8.6).
+model MenuCook {
+  id       String  @id @default(cuid())
+  menuId   String
+  recipeId String
+  order    Int     @default(0)
+  /// Pinned by the user: the optimiser treats it as a constraint, not a
+  /// suggestion (spec §8.3).
+  isLocked Boolean @default(false)
+
+  cookedAt DateTime?
+
+  menu     Menu      @relation(fields: [menuId], references: [id], onDelete: Cascade)
+  recipe   Recipe    @relation(fields: [recipeId], references: [id], onDelete: Restrict)
+  portions Portion[]
+
+  @@index([menuId, order])
+  @@index([recipeId])
+}
+
+/// One person's serving of one cook. The unit the pool is made of.
+///
+/// A portion carries its own scale factor because the two of us eat different
+/// amounts of the same dish: the shop is sized off the sum of the scale factors,
+/// and only an eater of "me" ever reaches a DayLog.
+model Portion {
+  id          String @id @default(cuid())
+  menuCookId  String
+  /// "me" | "partner"
+  eater       String
+  scaleFactor Float  @default(1)
+
+  /// Snapshotted at plan time from the scaled ingredient lines, so the pool lists
+  /// without recomputing every recipe on every page load.
+  calories Int
+  proteinG Float
+  carbsG   Float
+  fatG     Float
+
+  /// planned | eaten | binned
+  status      String  @default("planned")
+  /// Set once cooked — a portion only starts perishing once it exists.
+  expiresOn   String?
+  /// The day key it was eaten on, and the entry it wrote. Deleting that entry
+  /// releases the portion back to the pool.
+  eatenOn     String?
+  foodEntryId String? @unique
+
+  cook MenuCook @relation(fields: [menuCookId], references: [id], onDelete: Cascade)
+
+  @@index([menuCookId])
+  @@index([status])
+}
+
+/// One line of the shop, in pack units, with the leftover made explicit (spec §8.7).
+model ShoppingLine {
+  id           String  @id @default(cuid())
+  menuId       String
+  ingredientId String
+  packSizeId   String?
+  packCount    Int     @default(1)
+
+  /// What the menu needs in total.
+  gramsNeeded     Float
+  /// Covered from the pantry, so not bought.
+  gramsFromPantry Float @default(0)
+  /// What the chosen packs actually deliver.
+  gramsBought     Float @default(0)
+  /// gramsBought - (gramsNeeded - gramsFromPantry). Goes to the pantry on shop.
+  surplusGrams    Float @default(0)
+
+  priceGbp     Float?
+  /// The waste charge this line contributed, after shelf-life weighting.
+  wasteCostGbp Float   @default(0)
+  isTicked     Boolean @default(false)
+
+  menu       Menu       @relation(fields: [menuId], references: [id], onDelete: Cascade)
+  ingredient Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+  packSize   PackSize?  @relation(fields: [packSizeId], references: [id], onDelete: SetNull)
+
+  @@unique([menuId, ingredientId])
+  @@index([menuId])
+  @@index([ingredientId])
+  @@index([packSizeId])
 }

@@ -39,20 +39,31 @@ export async function startSession(input: { cycleSlotId?: string; exerciseGroupI
 }
 
 export async function finishSession(sessionId: string) {
-  const sets = await db.setLog.count({ where: { sessionId } });
-  if (sets === 0) {
-    // Nothing was logged; an empty session in the history is noise, not data.
-    await db.session.delete({ where: { id: sessionId } });
-  } else {
-    await db.session.update({ where: { id: sessionId }, data: { endedAt: new Date() } });
+  // Finishing and discarding are both idempotent. A session can legitimately be
+  // gone by the time the button is pressed — starting another one deletes an open
+  // empty session, and the browser may still be showing the old logger from its
+  // client-side cache. "Make this session not exist" is then already true, so
+  // treat it as done rather than throwing P2025 and blowing up the page.
+  const session = await db.session.findUnique({ where: { id: sessionId } });
+
+  if (session) {
+    const sets = await db.setLog.count({ where: { sessionId } });
+    if (sets === 0) {
+      // Nothing was logged; an empty session in the history is noise, not data.
+      await db.session.delete({ where: { id: sessionId } });
+    } else {
+      await db.session.update({ where: { id: sessionId }, data: { endedAt: new Date() } });
+    }
   }
+
   revalidatePath("/");
   revalidatePath("/train");
   redirect("/");
 }
 
 export async function discardSession(sessionId: string) {
-  await db.session.delete({ where: { id: sessionId } });
+  // Idempotent for the same reason as finishSession above.
+  await db.session.deleteMany({ where: { id: sessionId } });
   revalidatePath("/");
   revalidatePath("/train");
   redirect("/");
