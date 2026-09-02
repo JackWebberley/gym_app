@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@/generated/prisma/client";
 
@@ -38,9 +39,28 @@ function createClient(connectionString: string, poolMax: number) {
   });
 }
 
-// Keyed on the per-request ExecutionContext, so the client lives exactly as long
-// as the request whose I/O it owns and is collected with it.
-const perRequest = new WeakMap<object, ReturnType<typeof createClient>>();
+/**
+ * One client per request, on Workers.
+ *
+ * This was a WeakMap keyed on `getCloudflareContext().ctx ?? cf`, which looked
+ * per-request and was not: when `ctx` is undefined the key falls back to the
+ * context object itself, and OpenNext hands out the same one for the life of the
+ * isolate. The map then behaves exactly like the module-level singleton the
+ * comment above warns against — the first request opens a socket, Workers closes
+ * it when that request ends, and every later request on the same isolate gets
+ * the dead client back and fails. First action after a page load works, the rest
+ * return 500, and a while later a fresh isolate makes it look intermittent.
+ *
+ * `cache()` is scoped to the React request — a server render or a server action —
+ * which is exactly the lifetime a socket may span. It also memoises, so the
+ * Proxy below can call this on every property access without opening a
+ * connection each time.
+ */
+const workerClient = cache((connectionString: string) =>
+  // One connection per request: Hyperdrive pools on the other side, and a larger
+  // pool here would just open sockets this request cannot outlive.
+  createClient(connectionString, 1),
+);
 
 const globalForPrisma = globalThis as unknown as { prisma?: ReturnType<typeof createClient> };
 
@@ -49,15 +69,7 @@ function client(): ReturnType<typeof createClient> {
   const hyperdrive = cf?.env?.HYPERDRIVE as HyperdriveBinding | undefined;
 
   if (cf && hyperdrive?.connectionString) {
-    const key = cf.ctx ?? cf;
-    const existing = perRequest.get(key);
-    if (existing) return existing;
-
-    // One connection per request: Hyperdrive pools on the other side, and a
-    // larger pool here would just open sockets this request cannot outlive.
-    const fresh = createClient(hyperdrive.connectionString, 1);
-    perRequest.set(key, fresh);
-    return fresh;
+    return workerClient(hyperdrive.connectionString);
   }
 
   if (!globalForPrisma.prisma) {

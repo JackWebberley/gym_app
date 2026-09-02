@@ -33,7 +33,15 @@
   "hyperdrive": [
     {
       "binding": "HYPERDRIVE",
-      "id": "a4edfa75732c4b3cb1e12953b6dd6324"
+      "id": "a4edfa75732c4b3cb1e12953b6dd6324",
+      // Hyperdrive caches read queries for up to a minute by default. For a
+      // read-write app that is not a speed-up, it is a correctness bug: a page
+      // renders a cook that was already deleted, the next mutation looks it up,
+      // gets the cached row, then fails on the write with "no record was found
+      // for a delete" — surfacing in the browser as React error 441. It is also
+      // why waiting ~30 seconds and refreshing appeared to fix things: the cache
+      // had expired.
+      "caching": { "disabled": true }
     }
   ],
 

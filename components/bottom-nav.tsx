@@ -117,9 +117,14 @@ export function BottomNav() {
             <Link
               key={item.href}
               href={item.href}
-              // The bar is always on screen, so every tab prefetches up to its loading
-              // boundary. Without this a dynamic route is only fetched on click.
-              prefetch
+              // Deliberately NOT prefetched. Every route here is force-dynamic, so
+              // a prefetch is a full server render against the database — and the
+              // bar is on screen everywhere, so all five re-prefetch every time
+              // anything invalidates the router cache. One tap of ✕ on a menu was
+              // firing eleven renders and locking the main thread parsing them,
+              // which is what made the button look dead. `loading.tsx` already
+              // covers the wait with a skeleton.
+              prefetch={false}
               aria-current={active ? "page" : undefined}
               className={cx(
                 "relative flex flex-1 flex-col items-center gap-1 pt-2.5 pb-2 text-micro font-medium tracking-wide no-underline transition-colors duration-(--dur-fast) ease-(--ease-standard) hover:no-underline",

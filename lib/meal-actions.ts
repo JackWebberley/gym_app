@@ -29,20 +29,31 @@ import type { Brief, Eater, IngredientSpec, MealType, RecipeSpec } from "./meal/
 /// CPU budget, and re-rendering three routes when one changed is most of that
 /// budget spent on nothing. Marking a meal cooked does not move a single calorie,
 /// so it has no business re-rendering the dashboard.
-function revalidateMeals() {
+/// The menu and shopping screens are where most of these actions are invoked
+/// from, and they were not being revalidated at all — the write landed, the page
+/// kept rendering the old tree, and the button looked dead.
+///
+/// Concrete paths, not `revalidatePath("/meals/[id]", "page")`. The dynamic form
+/// needs the route's cache entry to exist, and this app configures no incremental
+/// cache (every route is force-dynamic), so on Workers that call throws and the
+/// whole action returns a 500 — which the client shows as React error 441.
+function revalidateMeals(menuId?: string) {
   revalidatePath("/meals");
+  if (menuId) {
+    revalidatePath(`/meals/${menuId}`);
+    revalidatePath(`/meals/${menuId}/shopping`);
+  }
 }
 
 /// The pool is visible on Food as well as Meals.
-function revalidatePool() {
-  revalidatePath("/meals");
+function revalidatePool(menuId?: string) {
+  revalidateMeals(menuId);
   revalidatePath("/food");
 }
 
 /// Something was actually eaten, so the day's totals and the dashboard moved.
-function revalidateLog() {
-  revalidatePath("/meals");
-  revalidatePath("/food");
+function revalidateLog(menuId?: string) {
+  revalidatePool(menuId);
   revalidatePath("/");
 }
 
@@ -127,7 +138,7 @@ export async function planMenu(input: {
       },
     });
 
-    revalidatePool();
+    revalidatePool(menu.id);
     return { kind: "ok", menuId: menu.id, generated, gaps: solution.gaps };
   } catch (e) {
     if (e instanceof MissingApiKeyError) return { kind: "error", message: e.message };
@@ -355,7 +366,7 @@ export async function rerollMenu(menuId: string): Promise<PlanResult> {
     });
   }
 
-  revalidatePool();
+  revalidatePool(menuId);
   return { kind: "ok", menuId, generated: 0, gaps: solution.gaps };
 }
 
@@ -363,7 +374,7 @@ export async function toggleCookLock(cookId: string) {
   const cook = await db.menuCook.findUnique({ where: { id: cookId } });
   if (!cook) return;
   await db.menuCook.update({ where: { id: cookId }, data: { isLocked: !cook.isLocked } });
-  revalidateMeals();
+  revalidateMeals(cook.menuId);
 }
 
 /** Swaps one cook for a different recipe, keeping its serving count. */
@@ -439,7 +450,7 @@ export async function swapCook(input: { cookId: string; recipeId: string }) {
   if (fresh.length > 0) await db.portion.createMany({ data: fresh });
 
   await recostMenu(cook.menuId);
-  revalidatePool();
+  revalidatePool(cook.menuId);
 }
 
 export async function deleteMenu(menuId: string) {
@@ -464,14 +475,14 @@ export async function activateMenu(menuId: string) {
     db.menu.updateMany({ where: { isActive: true }, data: { isActive: false } }),
     db.menu.update({ where: { id: menuId }, data: { isActive: true } }),
   ]);
-  revalidatePool();
+  revalidatePool(menuId);
 }
 
 export async function renameMenu(input: { menuId: string; name: string }) {
   const name = input.name.trim();
   if (!name) throw new Error("Give the plan a name.");
   await db.menu.update({ where: { id: input.menuId }, data: { name } });
-  revalidatePool();
+  revalidatePool(input.menuId);
 }
 
 /**
@@ -482,18 +493,30 @@ export async function renameMenu(input: { menuId: string; name: string }) {
  * what you bought. Re-confirm to rebuild it around the change.
  */
 export async function deleteCook(cookId: string) {
+  try {
+    return await deleteCookInner(cookId);
+  } catch (e) {
+    // Server action failures reach the browser as an opaque digest, so the only
+    // way to see what actually broke is to put it in the Worker's logs.
+    console.error("deleteCook failed:", e instanceof Error ? `${e.name}: ${e.message}` : String(e));
+    console.error("deleteCook stack:", e instanceof Error ? (e.stack || "").slice(0, 900) : "");
+    throw e;
+  }
+}
+
+async function deleteCookInner(cookId: string) {
   const cook = await db.menuCook.findUnique({ where: { id: cookId } });
   if (!cook) return;
   await db.menuCook.delete({ where: { id: cookId } });
   if (cook.menuId) await recostMenu(cook.menuId);
-  revalidatePool();
+  revalidatePool(cook.menuId);
 }
 
 /** Empties a plan of every cook, leaving the plan itself to build back up. */
 export async function clearMenuCooks(menuId: string) {
   await db.menuCook.deleteMany({ where: { menuId } });
   await recostMenu(menuId);
-  revalidatePool();
+  revalidatePool(menuId);
 }
 
 /* ── Costing and the shopping list ─────────────────────────────────────────── */
@@ -638,7 +661,7 @@ export async function confirmMenu(menuId: string) {
     });
   }
 
-  revalidatePool();
+  revalidatePool(menuId);
 }
 
 export async function tickShoppingLine(input: { lineId: string; isTicked: boolean }) {
@@ -706,7 +729,7 @@ export async function markShopped(menuId: string) {
     data: { status: "shopped", shoppedAt: new Date() },
   });
 
-  revalidatePool();
+  revalidatePool(menuId);
 }
 
 /* ── Cooking and eating ────────────────────────────────────────────────────── */
@@ -733,10 +756,11 @@ export async function markCooked(cookId: string) {
     }),
   ]);
 
-  revalidatePool();
+  revalidatePool(cook.menuId);
 }
 
 export async function markNotCooked(cookId: string) {
+  const cook = await db.menuCook.findUnique({ where: { id: cookId }, select: { menuId: true } });
   await db.$transaction([
     db.menuCook.update({ where: { id: cookId }, data: { cookedAt: null } }),
     db.portion.updateMany({
@@ -744,7 +768,7 @@ export async function markNotCooked(cookId: string) {
       data: { expiresOn: null },
     }),
   ]);
-  revalidatePool();
+  revalidatePool(cook?.menuId);
 }
 
 /**
