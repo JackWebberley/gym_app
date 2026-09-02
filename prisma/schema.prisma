@@ -308,8 +308,25 @@ model Recipe {
   /// breakfast | lunch | dinner | snack
   mealType        String
   prepMinutes     Int       @default(30)
-  /// Markdown.
+  /// Markdown. A terse summary — the two or three lines that say what the dish
+  /// is. Seeded for every recipe, and what the model returns when it writes one.
   method          String    @default("")
+  /// A method you can genuinely cook from: equipment, oven temperature, per-step
+  /// timings, and which of the recipe's ingredients each step uses. Written on
+  /// demand the first time a cook is opened and then kept, the same bargain
+  /// `SavedFood` and generated recipes strike — the API is asked once per dish,
+  /// ever (spec §5.3, §8.3).
+  ///
+  /// JSON rather than markdown, because this app has no markdown renderer and
+  /// steps as data are worth more than steps as prose: the page can number them,
+  /// time them, and print the exact pan quantity beside each one. An empty string
+  /// means "not written yet", which is the only state the UI has to distinguish.
+  ///
+  /// **No quantities are stored in here.** The steps name ingredients; every gram
+  /// figure on the page is computed from the recipe lines and the cook's scale
+  /// factors, so one method stays correct for a single portion and for a batch of
+  /// six (spec §8.1 — the model never does arithmetic).
+  methodFullJson  String    @default("")
   isFavourite     Boolean   @default(false)
   isArchived      Boolean   @default(false)
   timesCooked     Int       @default(0)

@@ -183,6 +183,37 @@ the week is. That becomes a slippage term: the less certain the week, the harder
 the optimiser leans on recipes that freeze and keep, so being wrong is cheap by
 construction.
 
+### Cooking from it
+
+Tapping a dish anywhere it appears — the menu, the pool on Meals, the pool on
+Food — opens the cooking sheet for it. Three sets of quantities, and the
+difference between them is the point of the screen:
+
+| | |
+|---|---|
+| **One serving, each** | full macros for my portion and hers, what share of each daily target they are, and what the meal type was aimed at |
+| **Weigh out** | the pan, for one cooking session — scalable lines summed across the portions, fixed lines multiplied per portion |
+| **Dividing it up** | per serving, only the adjustable lines, because everything else divides evenly |
+
+The method is the only prose on the page, and **the steps contain no quantities
+at all**. They name ingredients; the weight is printed beneath each step from the
+same pan figures. That is what lets one stored method be correct for a single
+portion and for a batch of six, and it is §8.1's rule applied to prose: the model
+writes, we do the arithmetic.
+
+The seeded methods are three-line summaries — enough to recognise a dish, not
+enough to cook it at 7am — so the full one is written the first time a dish is
+opened and then kept on the recipe. Every later open, on any week's plan, reads it
+back for nothing. Same bargain `SavedFood` strikes for estimation (§5.3): one API
+call per dish, ever. A dish with no key configured, or a call that fails, still
+shows its summary.
+
+Reading that stored JSON back is the one part that could fail quietly, so it lives
+in `lib/meal/method.ts` with the other pure modules and is tested there. It
+refuses rather than guesses: a half-parsed method reports as "not written yet"
+and offers to write itself again, and an ingredient name that no longer matches a
+recipe line loses its caption rather than borrowing the wrong weight.
+
 ### The recipe library
 
 118 recipes: 100 protein-led ones in `seed-recipes.ts` plus the original 18
@@ -340,6 +371,7 @@ app/
   meals/                      the menu, the pool, the readout
   meals/plan/                 the brief: how many meals, how sure the week is
   meals/[id]/                 review: lock, swap, reroll, confirm
+  meals/[id]/recipe/[id]/     the cooking sheet: method, the pan, both portions
   meals/[id]/shopping/        the shop by aisle, with the waste line
   meals/recipes/              the recipe library
   meals/pantry/               leftover stock and expiry dates
@@ -357,6 +389,7 @@ lib/
   nutrition-actions.ts        every nutrition mutation
   meal/types.ts               plain domain types, no Prisma
   meal/portions.ts            §8.5 scaling and ingredient quantities — pure, tested
+  meal/method.ts              reading a stored cooking method back — pure, tested
   meal/envelopes.ts           what a meal of each type should land on — pure, tested
   meal/packs.ts               §8.1 cooking quantities → shop quantities — pure, tested
   meal/basket.ts              §8.4 costing the shop and the waste — pure, tested

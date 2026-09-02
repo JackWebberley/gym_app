@@ -78,6 +78,28 @@ export type RecipeSpec = {
   lines: RecipeLineSpec[];
 };
 
+/// One step of a method you can cook from.
+///
+/// `uses` names the recipe's own ingredients — canonical names, exactly as the
+/// `Ingredient` table spells them — and carries no quantity. The page prints the
+/// grams beside the step, computed from the recipe lines and the cook's scale
+/// factors, which is what keeps one stored method correct for a single portion
+/// and for a batch of six (spec §8.1: the model never does arithmetic).
+export type MethodStep = {
+  text: string;
+  /// Roughly how long the step takes, when it is time spent waiting rather than
+  /// doing. Null for an instant step.
+  minutes: number | null;
+  uses: string[];
+};
+
+export type FullMethod = {
+  equipment: string[];
+  /// "200°C fan", "grill on high" — null when nothing is preheated.
+  preheat: string | null;
+  steps: MethodStep[];
+};
+
 export type PantryStock = {
   ingredientId: string;
   grams: number;

@@ -1,7 +1,7 @@
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 import { MODEL, MissingApiKeyError, createClient, isConfigured, withFriendlyErrors } from "../anthropic";
-import type { IngredientSpec, MealType } from "./types";
+import type { FullMethod, IngredientSpec, MealType } from "./types";
 
 /// Candidate recipe generation (spec §8.3, step 1).
 ///
@@ -268,4 +268,154 @@ export function resolveIngredientName(
   }
 
   return null;
+}
+
+/* ── Writing a method you can cook from ────────────────────────────────────── */
+
+/// The library's methods are summaries: "scramble the eggs slowly with the
+/// butter" is enough to recognise a dish and nowhere near enough to cook it at
+/// 7am. This asks for the rest — equipment, oven temperature, per-step timings,
+/// and the order things actually happen in — once per dish, ever, and the result
+/// is saved on the recipe.
+///
+/// The same division of labour as everything else here: **the model writes prose
+/// and we do the arithmetic** (spec §8.1). Steps name ingredients and are
+/// forbidden from quoting gram figures, because the page prints those itself from
+/// the recipe lines and the cook's scale factors. A method that said "beat 145g of
+/// eggs" would be wrong the moment the same dish is cooked for two people or
+/// batched for six; a method that says "beat the eggs" never is.
+
+const MethodStepSchema = z.object({
+  text: z
+    .string()
+    .describe(
+      "One step, imperative, no leading number. NEVER quote a weight, volume or gram figure — the app prints the exact quantity beside the step. Refer to ingredients by name: 'beat the eggs', not 'beat 145g of eggs'.",
+    ),
+  minutes: z
+    .number()
+    .nullable()
+    .describe(
+      "Roughly how long this step takes, when it is time spent waiting, frying, simmering or baking. Null for a step that is instant.",
+    ),
+  uses: z
+    .array(z.string())
+    .describe(
+      "Which of the listed ingredients this step uses, spelled EXACTLY as listed. Empty for a step that uses none of them.",
+    ),
+});
+
+const FullMethodSchema = z.object({
+  equipment: z
+    .array(z.string())
+    .describe(
+      "Kit this needs, terse: 'large non-stick frying pan', 'baking tray', 'blender'. Leave out the obvious — knife, board, bowl, spoon.",
+    ),
+  preheat: z
+    .string()
+    .nullable()
+    .describe("Oven or grill setting, e.g. '200°C fan' or 'grill on high'. Null if nothing is preheated."),
+  steps: z.array(MethodStepSchema).describe("Six to ten steps for a real dish; two or three for assembly."),
+});
+
+const METHOD_SYSTEM_PROMPT = `You write the cooking method for a dish that already exists.
+
+The recipe — its name, its ingredients and its quantities — is fixed and is given
+to you. You are not designing it, substituting anything, or changing the amounts.
+You are writing down how to cook it properly.
+
+What is being asked for is the part a summary leaves out:
+- The order things happen in, and what happens while something else cooks.
+- Real timings: how long to sear, simmer, bake, rest.
+- Heat: oven temperature, and whether the hob is high, medium or low.
+- The doneness cue for anything that can be got wrong — "until the core is 75°C",
+  "until it stops smelling of raw flour", "until it pulls away from the pan".
+- Where a step matters to the result, say why in a few words.
+
+Rules:
+- UK kitchen: °C fan for the oven, grill not broiler, hob not stovetop.
+- NEVER write a quantity. No grams, no millilitres, no "a handful", no "two
+  slices". The app prints the exact weight beside each step, computed for however
+  many portions are being cooked, and a number in your text would contradict it.
+  Say "the chicken", "the rice", "the stock".
+- Every ingredient in the list must be used by some step, and 'uses' must spell it
+  exactly as the list does.
+- Salt, pepper and oil are usually staples in this kitchen; still reference them by
+  name in 'uses' when a step uses them.
+- No preamble, no serving suggestions, no commentary on how healthy it is.
+- Stay faithful to the summary method you are given. If it says the salmon is
+  draped over at the end, it is draped over at the end.`;
+
+export type MethodRequest = {
+  name: string;
+  mealType: MealType;
+  prepMinutes: number;
+  /** The terse library method. The dish to stay faithful to. */
+  summary: string;
+  /**
+   * Ingredient names with their base-portion grams. The quantities are here so
+   * the steps can be proportionate — a 30g knob of butter is melted, a 300g one
+   * is a confit — not so they can be quoted back.
+   */
+  lines: { name: string; grams: number; note: string | null }[];
+};
+
+export function buildMethodPrompt(request: MethodRequest): string {
+  const lines = request.lines
+    .map((l) => `- ${l.name} — ${Math.round(l.grams)}g${l.note ? ` (${l.note})` : ""}`)
+    .join("\n");
+
+  return `Dish: ${request.name}
+Meal: ${request.mealType}
+Roughly ${request.prepMinutes} minutes, hands-on.
+
+Ingredients, for ONE portion — the app scales these, so do not quote them:
+${lines}
+
+The summary method to expand, which is the dish as written and must be respected:
+${request.summary || "(none recorded — write the obvious method for this dish)"}`;
+}
+
+/**
+ * Asks for the full method for one dish.
+ *
+ * Called at most once per recipe: the result is saved, and every later open reads
+ * it back from the database. A well-used library therefore reaches the API a
+ * handful of times and then stops, exactly as the food estimator does once the
+ * personal library fills up (spec §5.3).
+ */
+export async function writeFullMethod(request: MethodRequest): Promise<FullMethod> {
+  if (!isConfigured()) {
+    throw new MissingApiKeyError("the recipe still shows the summary method it was seeded with.");
+  }
+
+  const client = createClient();
+
+  const response = await withFriendlyErrors(() =>
+    client.messages.parse({
+      model: MODEL,
+      max_tokens: 8000,
+      output_config: {
+        // Lower effort than writing a recipe from scratch: the dish, the
+        // ingredients and the quantities are all given, so this is careful
+        // description rather than design.
+        effort: "low",
+        format: zodOutputFormat(FullMethodSchema),
+      },
+      system: [
+        // Stable prefix first: the only thing that varies between calls is the
+        // dish, so the cache hits on every recipe after the first.
+        { type: "text", text: METHOD_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
+      ],
+      messages: [{ role: "user", content: buildMethodPrompt(request) }],
+    }),
+  );
+
+  if (response.stop_reason === "refusal") {
+    throw new Error("The model declined to write that method.");
+  }
+
+  const parsed = response.parsed_output;
+  if (!parsed) throw new Error("Could not read the method that came back. Try again.");
+
+  return parsed;
 }
