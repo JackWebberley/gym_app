@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { binPortion, eatPortion, markCooked } from "@/lib/meal-actions";
 import type { PoolPortion } from "@/lib/meal-queries";
+import { groupPool, type PoolGroup } from "@/lib/meal/pool";
 import { Badge, Button, Card, Eyebrow, Hint, Note, SectionHeader, Tag, cx } from "@/components/ui";
 
 /// The pool, on the screen where you actually eat.
@@ -14,6 +15,17 @@ import { Badge, Button, Card, Eyebrow, Hint, Note, SectionHeader, Tag, cx } from
 /// what is actually left, so the scalable components get re-tuned one last time
 /// against the real number (spec §8.5). A planned meal logged this way has no
 /// estimation error at all and costs no API call (spec §8.8).
+///
+/// Servings are grouped by meal and folded by dish, because four identical
+/// yoghurts are one decision, not four. Acting on a row takes the serving that
+/// expires soonest, so eating from a group is always the right one to eat.
+
+const SECTION_LABEL: Record<string, string> = {
+  breakfast: "Breakfast",
+  lunch: "Lunch",
+  dinner: "Dinner",
+  snack: "Snacks",
+};
 
 export function ReadyNow({
   pool,
@@ -44,8 +56,7 @@ export function ReadyNow({
     });
   }
 
-  const cooked = pool.filter((p) => p.isCooked);
-  const toCook = pool.filter((p) => !p.isCooked);
+  const sections = groupPool(pool);
 
   return (
     <section>
@@ -64,44 +75,39 @@ export function ReadyNow({
         </div>
       ) : null}
 
-      <div className="space-y-2">
-        {cooked.map((portion) => (
-          <PortionCard
-            key={portion.id}
-            portion={portion}
-            caloriesLeft={caloriesLeft}
-            dayKey={dayKey}
-            isPending={isPending}
-            isFitting={fitting === portion.id}
-            onToggleFit={() => setFitting(fitting === portion.id ? null : portion.id)}
-            run={run}
-          />
+      <div className="space-y-4">
+        {sections.map((section) => (
+          <div key={section.mealType}>
+            <Eyebrow className="mb-1.5">
+              {SECTION_LABEL[section.mealType] ?? section.mealType}
+              <span className="ml-1.5 font-mono text-fg-faint">
+                {section.count}
+                {section.cookedCount > 0 ? ` · ${section.cookedCount} ready` : ""}
+              </span>
+            </Eyebrow>
+            <div className="space-y-2">
+              {section.groups.map((group) => (
+                <PortionCard
+                  key={group.key}
+                  group={group}
+                  caloriesLeft={caloriesLeft}
+                  dayKey={dayKey}
+                  isPending={isPending}
+                  isFitting={fitting === group.key}
+                  onToggleFit={() => setFitting(fitting === group.key ? null : group.key)}
+                  run={run}
+                />
+              ))}
+            </div>
+          </div>
         ))}
-
-        {toCook.length > 0 ? (
-          <>
-            <Eyebrow className="pt-2">Needs cooking</Eyebrow>
-            {toCook.map((portion) => (
-              <PortionCard
-                key={portion.id}
-                portion={portion}
-                caloriesLeft={caloriesLeft}
-                dayKey={dayKey}
-                isPending={isPending}
-                isFitting={fitting === portion.id}
-                onToggleFit={() => setFitting(fitting === portion.id ? null : portion.id)}
-                run={run}
-              />
-            ))}
-          </>
-        ) : null}
       </div>
     </section>
   );
 }
 
 function PortionCard({
-  portion,
+  group,
   caloriesLeft,
   dayKey,
   isPending,
@@ -109,7 +115,7 @@ function PortionCard({
   onToggleFit,
   run,
 }: {
-  portion: PoolPortion;
+  group: PoolGroup<PoolPortion>;
   caloriesLeft: number;
   dayKey: string;
   isPending: boolean;
@@ -117,6 +123,11 @@ function PortionCard({
   onToggleFit: () => void;
   run: (action: () => Promise<unknown>) => void;
 }) {
+  // Whatever goes off first: eating from a group of four should never leave the
+  // oldest one behind.
+  const portion = group.next;
+  const many = group.count > 1;
+
   // Only worth offering a resize when the day has room to describe and the gap is
   // big enough to matter. Below that it is noise dressed up as precision.
   const gap = caloriesLeft - portion.calories;
@@ -125,13 +136,21 @@ function PortionCard({
   return (
     <Card className="p-4">
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-body-sm font-medium text-fg-strong">{portion.recipeName}</p>
+        {/* Something in the pool still to cook needs its method, and this is the
+            screen you are on when you decide to cook it. */}
+        <Link
+          href={`/meals/${portion.menuId}/recipe/${portion.recipeId}`}
+          className="min-w-0 flex-1 no-underline hover:no-underline"
+        >
+          <p className="truncate text-body-sm font-medium text-fg-strong">
+            {portion.recipeName}
+            {many ? <span className="ml-1.5 font-mono text-fg-muted">×{group.count}</span> : null}
+          </p>
           <p className="mt-0.5 font-mono text-micro tracking-wide text-fg-faint">
             {portion.calories} KCAL · {portion.proteinG.toFixed(0)}P · {portion.carbsG.toFixed(0)}C
             · {portion.fatG.toFixed(0)}F
           </p>
-        </div>
+        </Link>
         <div className="flex shrink-0 items-center gap-1.5">
           {portion.isCooked ? (
             <Badge
@@ -199,7 +218,7 @@ function PortionCard({
             disabled={isPending}
             onClick={() => run(() => markCooked(portion.cookId))}
           >
-            Cooked it{portion.siblingCount > 1 ? ` (${portion.siblingCount})` : ""}
+            Cook one{many ? ` of ${group.count}` : ""}
           </Button>
         ) : null}
 

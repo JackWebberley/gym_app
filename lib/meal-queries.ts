@@ -1,7 +1,17 @@
 import { db } from "./db";
 import { todayKey, shiftDayKey } from "./day";
-import { buildEnvelopes, normaliseSplits, type HouseholdSettings } from "./meal/envelopes";
-import type { IngredientSpec, MealType, PantryStock, RecipeSpec } from "./meal/types";
+import { buildEnvelopes, envelopeFor, normaliseSplits, type HouseholdSettings } from "./meal/envelopes";
+import { parseFullMethod } from "./meal/method";
+import { gramsForLine, ingredientNeeds } from "./meal/portions";
+import {
+  MEAL_TYPES,
+  type Eater,
+  type IngredientSpec,
+  type Macros,
+  type MealType,
+  type PantryStock,
+  type RecipeSpec,
+} from "./meal/types";
 import { isConfigured } from "./anthropic-config";
 
 /// Read models for the meal screens. Everything that turns database rows into the
@@ -150,6 +160,9 @@ export type PoolPortion = {
   daysLeft: number | null;
   prepMinutes: number;
   cookId: string;
+  /** Both carried so a pool row can link straight to the dish it came from. */
+  menuId: string;
+  recipeId: string;
   /** How many of my servings this cook still has left, cooked or not. */
   siblingCount: number;
 };
@@ -193,6 +206,8 @@ export async function getPool(dayKey: string = todayKey()): Promise<PoolPortion[
         daysLeft,
         prepMinutes: p.cook.recipe.prepMinutes,
         cookId: p.menuCookId,
+        menuId: p.cook.menuId,
+        recipeId: p.cook.recipeId,
         siblingCount: remainingByCook.get(p.menuCookId) ?? 1,
       };
     })
@@ -301,14 +316,93 @@ export async function getMenuScreen(menuId: string) {
 
   const brief = safeParseBrief(menu.briefJson);
 
-  // A recipe that does not batch produces one cook per meal, so the same name
-  // appears several times. Numbering them ("cook 2 of 3") is the difference
-  // between that reading as intentional and reading as a bug.
-  const totalByRecipe = new Map<string, number>();
-  for (const cook of menu.cooks) {
-    totalByRecipe.set(cook.recipeId, (totalByRecipe.get(cook.recipeId) ?? 0) + 1);
+  const cooks = menu.cooks.map((cook) => {
+    const mine = cook.portions.filter((p) => p.eater === "me");
+    const theirs = cook.portions.filter((p) => p.eater === "partner");
+    return {
+      id: cook.id,
+      recipeId: cook.recipeId,
+      name: cook.recipe.name,
+      mealType: cook.recipe.mealType as MealType,
+      prepMinutes: cook.recipe.prepMinutes,
+      batchFriendly: cook.recipe.batchFriendly,
+      leftoversFreeze: cook.recipe.leftoversFreeze,
+      keepsDays: cook.recipe.keepsDays,
+      method: cook.recipe.method,
+      isLocked: cook.isLocked,
+      cookedAt: cook.cookedAt?.toISOString() ?? null,
+      servingsForMe: mine.length,
+      servingsForPartner: theirs.length,
+      eaten: cook.portions.filter((p) => p.status === "eaten").length,
+      myPortion: mine[0]
+        ? { calories: mine[0].calories, proteinG: mine[0].proteinG, scaleFactor: mine[0].scaleFactor }
+        : null,
+      theirPortion: theirs[0]
+        ? { calories: theirs[0].calories, proteinG: theirs[0].proteinG, scaleFactor: theirs[0].scaleFactor }
+        : null,
+      ingredients: cook.recipe.items.map((item) => ({
+        name: item.ingredient.name,
+        grams: item.grams,
+        isScalable: item.isScalable,
+        minGrams: item.minGrams,
+        maxGrams: item.maxGrams,
+        note: item.note,
+      })),
+    };
+  });
+
+  /// A recipe that does not batch produces one cook per meal, so the same dish
+  /// appeared as three near-identical cards in a flat list of thirteen. Folding
+  /// them into one row with a count is the difference between a menu you can read
+  /// at a glance and a wall of repetition — and grouping those rows by meal type
+  /// is how anyone actually thinks about a week's food.
+  type Cook = (typeof cooks)[number];
+  const groupsByMeal = new Map<MealType, Map<string, Cook[]>>();
+  for (const cook of cooks) {
+    const byRecipe = groupsByMeal.get(cook.mealType) ?? new Map<string, Cook[]>();
+    byRecipe.set(cook.recipeId, [...(byRecipe.get(cook.recipeId) ?? []), cook]);
+    groupsByMeal.set(cook.mealType, byRecipe);
   }
-  const seenByRecipe = new Map<string, number>();
+
+  const sections = MEAL_TYPES.filter((t) => groupsByMeal.has(t)).map((mealType) => {
+    const groups = [...groupsByMeal.get(mealType)!.values()].map((sameRecipe) => {
+      const first = sameRecipe[0];
+      return {
+        recipeId: first.recipeId,
+        name: first.name,
+        mealType,
+        prepMinutes: first.prepMinutes,
+        batchFriendly: first.batchFriendly,
+        leftoversFreeze: first.leftoversFreeze,
+        method: first.method,
+        ingredients: first.ingredients,
+        myPortion: first.myPortion,
+        theirPortion: first.theirPortion,
+        /// Separate times this dish gets cooked. A batch-friendly recipe is one
+        /// cook covering several servings, so this stays 1 and the serving count
+        /// carries the number instead.
+        cookCount: sameRecipe.length,
+        servingsForMe: sameRecipe.reduce((n, c) => n + c.servingsForMe, 0),
+        servingsForPartner: sameRecipe.reduce((n, c) => n + c.servingsForPartner, 0),
+        cookedCount: sameRecipe.filter((c) => c.cookedAt).length,
+        isLocked: sameRecipe.every((c) => c.isLocked),
+        cookIds: sameRecipe.map((c) => c.id),
+        /// The next one still to be cooked, so "Cooked it" always has a target.
+        nextUncookedId: sameRecipe.find((c) => !c.cookedAt)?.id ?? null,
+      };
+    });
+
+    // Biggest first: that is the order you would actually shop and cook in.
+    groups.sort((a, b) => b.servingsForMe - a.servingsForMe || a.name.localeCompare(b.name));
+
+    return {
+      mealType,
+      groups,
+      servingsForMe: groups.reduce((n, g) => n + g.servingsForMe, 0),
+      cookCount: groups.reduce((n, g) => n + g.cookCount, 0),
+      cookedCount: groups.reduce((n, g) => n + g.cookedCount, 0),
+    };
+  });
 
   return {
     id: menu.id,
@@ -319,55 +413,184 @@ export async function getMenuScreen(menuId: string) {
     estimatedCostGbp: menu.estimatedCostGbp,
     projectedWasteGbp: menu.projectedWasteGbp,
     brief,
-    cooks: menu.cooks.map((cook) => {
-      const repeatTotal = totalByRecipe.get(cook.recipeId) ?? 1;
-      const repeatIndex = (seenByRecipe.get(cook.recipeId) ?? 0) + 1;
-      seenByRecipe.set(cook.recipeId, repeatIndex);
-      const mine = cook.portions.filter((p) => p.eater === "me");
-      const theirs = cook.portions.filter((p) => p.eater === "partner");
-      return {
-        id: cook.id,
-        recipeId: cook.recipeId,
-        name: cook.recipe.name,
-        mealType: cook.recipe.mealType as MealType,
-        prepMinutes: cook.recipe.prepMinutes,
-        batchFriendly: cook.recipe.batchFriendly,
-        leftoversFreeze: cook.recipe.leftoversFreeze,
-        keepsDays: cook.recipe.keepsDays,
-        method: cook.recipe.method,
-        isLocked: cook.isLocked,
-        cookedAt: cook.cookedAt?.toISOString() ?? null,
-        /// Which of several separate cooks of the same dish this is, and how many
-        /// there are. Both 1 when the recipe appears once.
-        repeatIndex,
-        repeatTotal,
-        servingsForMe: mine.length,
-        servingsForPartner: theirs.length,
-        eaten: cook.portions.filter((p) => p.status === "eaten").length,
-        myPortion: mine[0]
-          ? {
-              calories: mine[0].calories,
-              proteinG: mine[0].proteinG,
-              scaleFactor: mine[0].scaleFactor,
-            }
-          : null,
-        theirPortion: theirs[0]
-          ? {
-              calories: theirs[0].calories,
-              proteinG: theirs[0].proteinG,
-              scaleFactor: theirs[0].scaleFactor,
-            }
-          : null,
-        ingredients: cook.recipe.items.map((item) => ({
-          name: item.ingredient.name,
-          grams: item.grams,
-          isScalable: item.isScalable,
-          minGrams: item.minGrams,
-          maxGrams: item.maxGrams,
-          note: item.note,
-        })),
-      };
-    }),
+    cooks,
+    sections,
+  };
+}
+
+export type MenuSection = NonNullable<Awaited<ReturnType<typeof getMenuScreen>>>["sections"][number];
+export type CookGroup = MenuSection["groups"][number];
+
+/* ── One dish, in full ─────────────────────────────────────────────────────── */
+
+export type DishPlate = {
+  eater: Eater;
+  /** "You" / "Her" — this app has exactly two eaters and no user table. */
+  label: string;
+  /** Servings of this dish for this person across the menu, and how many are eaten. */
+  servings: number;
+  eaten: number;
+  scaleFactor: number;
+  /** The snapshot written at plan time — the numbers a log entry comes from. */
+  macros: Macros;
+  /** What a meal of this type is supposed to land on for this person. */
+  targetKcal: number;
+  minProteinG: number;
+  /** Share of this person's whole day, 0–1. */
+  shareOfDayKcal: number | null;
+  shareOfDayProteinG: number | null;
+  /** This person's plate, line by line. */
+  lines: { name: string; grams: number; isScalable: boolean; note: string | null }[];
+};
+
+export type DishScreen = NonNullable<Awaited<ReturnType<typeof getDishScreen>>>;
+
+/**
+ * Everything needed to actually cook one dish of a menu.
+ *
+ * Keyed by recipe rather than by cook, to match the list it is opened from: a
+ * dish that does not batch produces one `MenuCook` per meal, and those cooks are
+ * identical in everything but which one is ticked off. So the quantities here
+ * describe **one cooking session** — cooks[0] stands for all of them — and the
+ * count is reported alongside.
+ *
+ * Three sets of quantities, and the difference between them is the whole point of
+ * the screen:
+ *
+ *   **pan**    — what to weigh out for one session. Scalable lines take the *sum*
+ *                of the scale factors and fixed lines multiply per portion, which
+ *                is why a 1.0 + 0.65 cook wants 300g of chicken, not 360g.
+ *   **plates** — what lands in front of each person, and the macros that follow.
+ *                Read from the `Portion` snapshot rather than recomputed, because
+ *                that snapshot is what a log entry will be written from.
+ *   **steps**  — the method, with the pan quantity printed against each step.
+ *
+ * Nothing here re-solves anything. A confirmed menu is a commitment, and opening
+ * a recipe must not quietly move the numbers the shopping list was built from.
+ */
+export async function getDishScreen(menuId: string, recipeId: string) {
+  const cooks = await db.menuCook.findMany({
+    where: { menuId, recipeId },
+    orderBy: { order: "asc" },
+    include: {
+      menu: { select: { id: true, name: true, weekStart: true, status: true } },
+      recipe: {
+        include: { items: { include: { ingredient: true }, orderBy: { order: "asc" } } },
+      },
+      portions: true,
+    },
+  });
+
+  const cook = cooks[0];
+  if (!cook) return null;
+
+  const settings = await getHouseholdSettings();
+  const mealType = cook.recipe.mealType as MealType;
+  const spec = toRecipeSpec(cook.recipe);
+
+  // Every portion one session produces, both eaters together: that is what the
+  // pan has to hold.
+  const panNeeds = ingredientNeeds(
+    spec,
+    cook.portions.map((p) => p.scaleFactor),
+  );
+
+  const pan = cook.recipe.items.map((item) => ({
+    ingredientId: item.ingredientId,
+    name: item.ingredient.name,
+    grams: round1(panNeeds.get(item.ingredientId) ?? 0),
+    isScalable: item.isScalable,
+    isStaple: item.ingredient.isStaple,
+    note: item.note,
+    unitGrams: item.ingredient.unitGrams,
+  }));
+
+  const plate = (eater: Eater, label: string): DishPlate | null => {
+    const portions = cook.portions.filter((p) => p.eater === eater);
+    const first = portions[0];
+    if (!first) return null;
+
+    const envelope = envelopeFor(settings, eater, mealType);
+    const daily =
+      eater === "me"
+        ? { calories: settings.baseCalories, proteinG: settings.proteinTargetG }
+        : { calories: settings.partnerCalories, proteinG: settings.partnerProteinG };
+
+    // Servings across the whole dish, not just this session: the plate card is
+    // answering "what does one of these give me, and how many have I got".
+    const allForEater = cooks.flatMap((c) => c.portions.filter((p) => p.eater === eater));
+
+    return {
+      eater,
+      label,
+      servings: allForEater.length,
+      eaten: allForEater.filter((p) => p.status === "eaten").length,
+      scaleFactor: first.scaleFactor,
+      macros: {
+        calories: first.calories,
+        proteinG: first.proteinG,
+        carbsG: first.carbsG,
+        fatG: first.fatG,
+      },
+      targetKcal: Math.round(envelope.targetKcal),
+      minProteinG: Math.round(envelope.minProteinG),
+      shareOfDayKcal: daily.calories > 0 ? first.calories / daily.calories : null,
+      shareOfDayProteinG: daily.proteinG > 0 ? first.proteinG / daily.proteinG : null,
+      lines: cook.recipe.items.map((item) => ({
+        name: item.ingredient.name,
+        grams: round1(gramsForLine(item, first.scaleFactor)),
+        isScalable: item.isScalable,
+        note: item.note,
+      })),
+    };
+  };
+
+  const plates = [plate("me", "You"), plate("partner", "Her")].filter(
+    (p): p is DishPlate => p !== null,
+  );
+
+  const cookedCount = cooks.filter((c) => c.cookedAt).length;
+  // Earliest expiry across everything still in the pool: the date that actually
+  // constrains you.
+  const expiresOn =
+    cooks
+      .flatMap((c) => c.portions)
+      .filter((p) => p.status === "planned" && p.expiresOn)
+      .map((p) => p.expiresOn as string)
+      .sort()[0] ?? null;
+
+  return {
+    menu: {
+      id: cook.menu.id,
+      name: cook.menu.name ?? `Week of ${cook.menu.weekStart}`,
+      status: cook.menu.status as "draft" | "confirmed" | "shopped",
+    },
+    recipeId: cook.recipeId,
+    name: cook.recipe.name,
+    mealType,
+    prepMinutes: cook.recipe.prepMinutes,
+    keepsDays: cook.recipe.keepsDays,
+    batchFriendly: cook.recipe.batchFriendly,
+    leftoversFreeze: cook.recipe.leftoversFreeze,
+    timesCooked: cook.recipe.timesCooked,
+    isLocked: cooks.every((c) => c.isLocked),
+    /// Separate cooking sessions this dish gets. A batch-friendly recipe stays at
+    /// 1 and carries its servings on one cook instead.
+    cookCount: cooks.length,
+    cookedCount,
+    /// Portions one session produces, both eaters — what `pan` is sized for.
+    servingsPerCook: cook.portions.length,
+    expiresOn,
+    /// The terse library method. Always present, and what the screen shows until
+    /// the full one has been written.
+    summary: cook.recipe.method,
+    /// Null until the full method has been written for this dish. The steps name
+    /// ingredients and carry no quantities: the screen prints those from `pan`,
+    /// which is the only reason one stored method stays right for a single
+    /// portion and for a batch of six.
+    method: parseFullMethod(cook.recipe.methodFullJson),
+    pan,
+    plates,
   };
 }
 
@@ -509,6 +732,10 @@ export function isGenerationConfigured(): boolean {
 
 import type { Brief } from "./meal/types";
 import { DEFAULT_BRIEF } from "./meal/types";
+
+function round1(n: number): number {
+  return Math.round(n * 10) / 10;
+}
 
 export function safeParseBrief(json: string): Brief {
   try {

@@ -14,13 +14,20 @@ import {
   toRecipeSpec,
 } from "./meal-queries";
 import { buildEnvelopes } from "./meal/envelopes";
+import { canonicaliseSteps, parseFullMethod } from "./meal/method";
 import { solve, type LockedCook } from "./meal/optimiser";
 import { WORTH_KEEPING_GRAMS, buildBasket } from "./meal/basket";
 import { ingredientNeeds, mergeNeeds, roundMacros, scaleForTarget, indexIngredients } from "./meal/portions";
 import { cheapestPacks } from "./meal/packs";
-import { generateRecipes, resolveIngredientName, type GenerationRequest } from "./meal/generate";
+import {
+  generateRecipes,
+  normaliseIngredientName,
+  resolveIngredientName,
+  writeFullMethod,
+  type GenerationRequest,
+} from "./meal/generate";
 import { MissingApiKeyError } from "./anthropic-config";
-import type { Brief, Eater, IngredientSpec, MealType, RecipeSpec } from "./meal/types";
+import type { Brief, Eater, FullMethod, IngredientSpec, MealType, RecipeSpec } from "./meal/types";
 
 /// Every meal-planning mutation. The optimiser itself is pure and lives in
 /// lib/meal; this file is the part that talks to the database and to Next.
@@ -532,6 +539,87 @@ async function deleteCookInner(cookId: string) {
   revalidatePool(cook.menuId);
 }
 
+/**
+ * Group-level actions.
+ *
+ * The menu screen folds repeats of the same dish into one row, so its buttons
+ * act on the dish rather than on one of three identical cards. Doing that by
+ * looping the per-cook actions from the client would be N round trips against a
+ * database in Frankfurt; these are one each.
+ */
+export async function deleteCookGroup(input: { menuId: string; recipeId: string }) {
+  const { count } = await db.menuCook.deleteMany({
+    where: { menuId: input.menuId, recipeId: input.recipeId },
+  });
+  if (count === 0) return;
+  await recostMenu(input.menuId);
+  revalidatePool(input.menuId);
+}
+
+/** Removes one cook of a dish, leaving the rest — the "×3 → ×2" case. */
+export async function deleteOneOfGroup(input: { menuId: string; recipeId: string }) {
+  // Drop an uncooked one first: cooked food exists and should not vanish from
+  // the plan just because the count came down.
+  const candidates = await db.menuCook.findMany({
+    where: { menuId: input.menuId, recipeId: input.recipeId },
+    orderBy: [{ cookedAt: { sort: "asc", nulls: "first" } }, { order: "desc" }],
+    take: 1,
+  });
+  if (candidates.length === 0) return;
+  await db.menuCook.delete({ where: { id: candidates[0].id } }).catch(() => {});
+  await recostMenu(input.menuId);
+  revalidatePool(input.menuId);
+}
+
+export async function toggleCookGroupLock(input: { menuId: string; recipeId: string }) {
+  const cooks = await db.menuCook.findMany({
+    where: { menuId: input.menuId, recipeId: input.recipeId },
+    select: { isLocked: true },
+  });
+  if (cooks.length === 0) return;
+  const locked = cooks.every((c) => c.isLocked);
+  await db.menuCook.updateMany({
+    where: { menuId: input.menuId, recipeId: input.recipeId },
+    data: { isLocked: !locked },
+  });
+  revalidateMeals(input.menuId);
+}
+
+/** Marks the next uncooked one of a dish as cooked. */
+export async function cookOneOfGroup(input: { menuId: string; recipeId: string }) {
+  const next = await db.menuCook.findFirst({
+    where: { menuId: input.menuId, recipeId: input.recipeId, cookedAt: null },
+    orderBy: { order: "asc" },
+  });
+  if (!next) return;
+  await markCooked(next.id);
+}
+
+/** Un-cooks the most recently cooked one of a dish. */
+export async function uncookOneOfGroup(input: { menuId: string; recipeId: string }) {
+  const last = await db.menuCook.findFirst({
+    where: { menuId: input.menuId, recipeId: input.recipeId, cookedAt: { not: null } },
+    orderBy: { cookedAt: "desc" },
+  });
+  if (!last) return;
+  await markNotCooked(last.id);
+}
+
+/** Swaps every cook of one dish for another, keeping the serving count. */
+export async function swapCookGroup(input: {
+  menuId: string;
+  recipeId: string;
+  replacementId: string;
+}) {
+  const cooks = await db.menuCook.findMany({
+    where: { menuId: input.menuId, recipeId: input.recipeId },
+    select: { id: true },
+  });
+  for (const cook of cooks) {
+    await swapCook({ cookId: cook.id, recipeId: input.replacementId });
+  }
+}
+
 /** Empties a plan of every cook, leaving the plan itself to build back up. */
 export async function clearMenuCooks(menuId: string) {
   await db.menuCook.deleteMany({ where: { menuId } });
@@ -977,6 +1065,79 @@ export async function toggleFavouriteRecipe(recipeId: string) {
 export async function archiveRecipe(recipeId: string) {
   await db.recipe.update({ where: { id: recipeId }, data: { isArchived: true } }).catch(() => {});
   revalidateMeals();
+}
+
+export type MethodResult =
+  | { kind: "ok"; method: FullMethod }
+  | { kind: "error"; message: string };
+
+/**
+ * Writes the full cooking method for one dish, once.
+ *
+ * The library's seeded methods are summaries — enough to recognise a dish, not
+ * enough to cook it — so the first time a cook is opened the rest gets written
+ * and saved on the recipe. Every later open, on any menu, reads it back for
+ * nothing. Same bargain as `SavedFood` (spec §5.3): the API is asked once per
+ * dish and then never again.
+ *
+ * A union rather than a thrown error, like `planMenu`: the failures here are all
+ * ones the user needs to read — no key, a rejected key, a rate limit — and Next
+ * masks the message of anything thrown out of a server action in production.
+ *
+ * Nothing is revalidated. The method is returned and rendered directly, and every
+ * route in this app is force-dynamic, so the next navigation reads it back from
+ * the database anyway. Revalidating three routes to change one paragraph would
+ * spend most of a Worker's CPU budget on nothing.
+ */
+export async function writeCookMethod(recipeId: string, rewrite = false): Promise<MethodResult> {
+  const recipe = await db.recipe.findUnique({
+    where: { id: recipeId },
+    include: { items: { include: { ingredient: true }, orderBy: { order: "asc" } } },
+  });
+  if (!recipe) return { kind: "error", message: "That recipe is no longer in the library." };
+
+  // Two screens open on the same dish would otherwise both pay for it.
+  const existing = parseFullMethod(recipe.methodFullJson);
+  if (existing && !rewrite) return { kind: "ok", method: existing };
+
+  try {
+    const written = await writeFullMethod({
+      name: recipe.name,
+      mealType: recipe.mealType as MealType,
+      prepMinutes: recipe.prepMinutes,
+      summary: recipe.method,
+      lines: recipe.items.map((item) => ({
+        name: item.ingredient.name,
+        grams: item.grams,
+        note: item.note,
+      })),
+    });
+
+    // Canonicalise the ingredient names the steps refer to, so the screen can
+    // print a quantity beside a step by matching on the name it holds. Anything
+    // that does not resolve is dropped before it is stored, using the same
+    // normalisation a generated ingredient name goes through.
+    const canonical = new Map(
+      recipe.items.map((item) => [normaliseIngredientName(item.ingredient.name), item.ingredient.name]),
+    );
+    const method = canonicaliseSteps(
+      written,
+      (name) => canonical.get(normaliseIngredientName(name)) ?? null,
+    );
+
+    await db.recipe.update({
+      where: { id: recipeId },
+      data: { methodFullJson: JSON.stringify(method) },
+    });
+
+    return { kind: "ok", method };
+  } catch (e) {
+    if (e instanceof MissingApiKeyError) return { kind: "error", message: e.message };
+    return {
+      kind: "error",
+      message: e instanceof Error ? e.message : "Could not write the method.",
+    };
+  }
 }
 
 /** Records the pack sizes for an ingredient the planner had to guess at (§8.9). */

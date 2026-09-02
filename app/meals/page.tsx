@@ -10,6 +10,7 @@ import {
 } from "@/lib/meal-queries";
 import { PlanSwitcher } from "./plan-switcher";
 import { formatGrams } from "@/lib/meal/packs";
+import { groupPool, type PoolGroup } from "@/lib/meal/pool";
 import {
   Badge,
   Card,
@@ -42,8 +43,7 @@ export default async function MealsPage() {
 
   const menu = menuRef ? await getMenuScreen(menuRef.id) : null;
   const expiring = pantry.filter((p) => p.isExpiringSoon || p.isExpired);
-  const cooked = pool.filter((p) => p.isCooked);
-  const toCook = pool.filter((p) => !p.isCooked);
+  const poolSections = groupPool(pool);
 
   return (
     <main>
@@ -127,14 +127,24 @@ export default async function MealsPage() {
                 </Link>
               }
             />
-            <ul className="divide-y divide-hairline overflow-hidden rounded-lg border border-hairline bg-card">
-              {cooked.map((portion) => (
-                <PoolRow key={portion.id} portion={portion} />
+            <div className="space-y-3">
+              {poolSections.map((section) => (
+                <div key={section.mealType}>
+                  <p className="mb-1 text-micro font-medium tracking-caps text-fg-muted uppercase">
+                    {POOL_LABEL[section.mealType] ?? section.mealType}
+                    <span className="ml-1.5 font-mono text-fg-faint">
+                      {section.count}
+                      {section.cookedCount > 0 ? ` · ${section.cookedCount} ready` : ""}
+                    </span>
+                  </p>
+                  <ul className="divide-y divide-hairline overflow-hidden rounded-lg border border-hairline bg-card">
+                    {section.groups.map((group) => (
+                      <PoolRow key={group.key} group={group} />
+                    ))}
+                  </ul>
+                </div>
               ))}
-              {toCook.map((portion) => (
-                <PoolRow key={portion.id} portion={portion} />
-              ))}
-            </ul>
+            </div>
             <p className="mt-2 text-caption text-fg-muted">
               Nothing here is tied to a day. Eat out tonight and these keep — the only cost is
               whatever runs out of shelf life, which is what the planner was minimising.
@@ -231,20 +241,37 @@ function Figure({ label, value, sub }: { label: string; value: string; sub?: str
   );
 }
 
+const POOL_LABEL: Record<string, string> = {
+  breakfast: "Breakfast",
+  lunch: "Lunch",
+  dinner: "Dinner",
+  snack: "Snacks",
+};
+
 function PoolRow({
-  portion,
+  group,
 }: {
-  portion: Awaited<ReturnType<typeof getPool>>[number];
+  group: PoolGroup<Awaited<ReturnType<typeof getPool>>[number]>;
 }) {
+  const portion = group.next;
+  const many = group.count > 1;
   return (
     <li className="flex items-center gap-3 px-4 py-3">
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-body-sm text-fg-strong">{portion.recipeName}</p>
+      {/* A serving still to cook is the most likely reason to want the recipe, so
+          the row opens it rather than merely naming it. */}
+      <Link
+        href={`/meals/${portion.menuId}/recipe/${portion.recipeId}`}
+        className="min-w-0 flex-1 no-underline hover:no-underline"
+      >
+        <p className="truncate text-body-sm text-fg-strong">
+          {portion.recipeName}
+          {many ? <span className="ml-1.5 font-mono text-fg-muted">×{group.count}</span> : null}
+        </p>
         <p className="font-mono text-micro tracking-wide text-fg-faint">
           {portion.calories} KCAL · {portion.proteinG.toFixed(0)}P
           {portion.isCooked ? "" : ` · ~${portion.prepMinutes} MIN TO COOK`}
         </p>
-      </div>
+      </Link>
       {portion.isCooked ? (
         <Badge tone={portion.daysLeft != null && portion.daysLeft <= 1 ? "warning" : "neutral"}>
           {portion.daysLeft == null
