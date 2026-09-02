@@ -55,6 +55,20 @@ export const WEIGHTS = {
   gbpPerUnknownIngredient: 1.5,
   /// An occasion nothing could fill.
   gbpPerUnfilledOccasion: 12,
+
+  /// Eating the same dish again. Superlinear, because the fourth gammon of the
+  /// week is far worse than the second — and without this the optimiser has no
+  /// reason not to fill a whole week with whichever recipe is cheapest per gram
+  /// of protein. Boredom is a real cost; leaving it out of the model does not
+  /// make it go away, it just makes the plan unusable.
+  gbpPerRepeat: 1.1,
+  /// How much of that a batch-friendly recipe escapes. Cooking one thing five
+  /// times is the single best waste reducer there is (spec §8.6) and the user
+  /// opted into it with the variety control, so it is discounted — not excused.
+  batchRepeatDiscount: 0.55,
+  /// Per serving of something the last few weeks already had. Enough to break a
+  /// tie and rotate the library, not enough to force a worse week.
+  gbpPerRecentRepeat: 1.6,
 };
 
 export type PlannedPortion = {
@@ -81,6 +95,7 @@ export type ScoreBreakdown = {
   shopCost: number;
   pantryRot: number;
   varietyShortfall: number;
+  repetition: number;
   favouriteBonus: number;
   prepOver: number;
   unknownIngredients: number;
@@ -106,6 +121,9 @@ export type SolveInput = {
   /// Cooks the user pinned. Treated as constraints: never moved, never replaced,
   /// but fully counted in the shop (spec §8.3).
   locked?: LockedCook[];
+  /// Recipes the last few plans already used. Rotating the library is what stops
+  /// every week converging on the same cheapest handful.
+  recentRecipeIds?: string[];
   seed?: number;
   iterations?: number;
   restarts?: number;
@@ -217,7 +235,9 @@ function evaluate(
     occasionsByRecipe.set(slot.recipeId, (occasionsByRecipe.get(slot.recipeId) ?? 0) + 1);
   }
 
+  const recent = new Set(input.recentRecipeIds ?? []);
   let macroDeviation = 0;
+  let repetition = 0;
   let favouriteBonus = 0;
   let prepOver = 0;
   let slippageRisk = 0;
@@ -244,6 +264,13 @@ function evaluate(
     }
 
     allNeeds.push(ingredientNeeds(recipe, scaleFactors));
+
+    // Repetition, and whether we ate it recently.
+    if (occasions > 1) {
+      const discount = recipe.batchFriendly ? WEIGHTS.batchRepeatDiscount : 1;
+      repetition += WEIGHTS.gbpPerRepeat * discount * Math.pow(occasions - 1, 1.4);
+    }
+    if (recent.has(recipeId)) repetition += WEIGHTS.gbpPerRecentRepeat * occasions;
 
     if (recipe.isFavourite) favouriteBonus += occasions * WEIGHTS.gbpFavouriteBonus;
     if (brief.maxPrepMinutes != null && recipe.prepMinutes > brief.maxPrepMinutes) {
@@ -293,6 +320,7 @@ function evaluate(
     shopCost: basket.totalCostGbp,
     pantryRot: basket.pantryRotGbp,
     varietyShortfall,
+    repetition,
     favouriteBonus,
     prepOver,
     unknownIngredients,
@@ -306,6 +334,7 @@ function evaluate(
     breakdown.shopCost +
     breakdown.pantryRot +
     breakdown.varietyShortfall +
+    breakdown.repetition +
     breakdown.prepOver +
     breakdown.unknownIngredients +
     breakdown.slippageRisk +

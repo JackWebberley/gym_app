@@ -315,7 +315,14 @@ describe("solve", () => {
     const flexible = solve(input({ ...shared, brief: brief({ cookConfidence: "flexible" }) }));
 
     expect(flexible.breakdown.slippageRisk).toBeGreaterThan(certain.breakdown.slippageRisk);
-    expect(flexible.cooks.every((c) => c.recipeId === "robust")).toBe(true);
+
+    // Leans towards the robust one rather than exclusively using it — the
+    // repetition cost now competes, which is the correct trade: a week of food
+    // that keeps is worth little if it is the same meal five times.
+    const robustShare = (s: typeof flexible) =>
+      s.cooks.filter((c) => c.recipeId === "robust").reduce((n, c) => n + c.occasions, 0);
+    expect(robustShare(flexible)).toBeGreaterThanOrEqual(robustShare(certain));
+    expect(robustShare(flexible)).toBeGreaterThan(0);
   });
 
   it("will not let a cheap dish buy its way under the protein floor", () => {
@@ -383,5 +390,90 @@ describe("solve", () => {
 
     expect(solution.cooks.reduce((n, c) => n + c.occasions, 0)).toBe(15);
     expect(elapsed).toBeLessThan(1000);
+  });
+});
+
+describe("variety across and within plans", () => {
+  // Two dinners, one clearly cheaper. Without a repetition cost the optimiser
+  // fills the whole week with the cheap one — which is optimal, and inedible.
+  const cheap = recipe({
+    id: "cheap",
+    name: "The cheap one",
+    lines: [
+      { ingredientId: "chicken", grams: 190, isScalable: true, minGrams: 130, maxGrams: 260 },
+      { ingredientId: "rice", grams: 70, isScalable: true, minGrams: 45, maxGrams: 110 },
+    ],
+  });
+  const dearer = recipe({
+    id: "dearer",
+    name: "The slightly dearer one",
+    lines: [
+      { ingredientId: "tofu", grams: 200, isScalable: true, minGrams: 140, maxGrams: 280 },
+      { ingredientId: "chicken", grams: 120, isScalable: true, minGrams: 90, maxGrams: 200 },
+      { ingredientId: "rice", grams: 60, isScalable: true, minGrams: 40, maxGrams: 100 },
+    ],
+  });
+
+  it("spreads a week across the library instead of repeating the cheapest dish", () => {
+    const solution = solve(
+      input({
+        candidates: [cheap, dearer],
+        brief: brief({ occasions: [{ mealType: "dinner", count: 5 }], minDistinct: {} }),
+      }),
+    );
+    const perRecipe = new Map<string, number>();
+    for (const c of solution.cooks) {
+      perRecipe.set(c.recipeId, (perRecipe.get(c.recipeId) ?? 0) + c.occasions);
+    }
+    // No single dish should take the whole week, even with no variety floor set.
+    expect(Math.max(...perRecipe.values())).toBeLessThan(5);
+    expect(solution.breakdown.repetition).toBeGreaterThan(0);
+  });
+
+  it("charges less for repeating something batch-friendly", () => {
+    const batch = recipe({ ...cheap, id: "batch", name: "Batch", batchFriendly: true });
+    const plain = solve(
+      input({ candidates: [cheap], brief: brief({ occasions: [{ mealType: "dinner", count: 4 }] }) }),
+    );
+    const batched = solve(
+      input({ candidates: [batch], brief: brief({ occasions: [{ mealType: "dinner", count: 4 }] }) }),
+    );
+    // Cooking one thing four times is a deliberate trade, not an accident.
+    expect(batched.breakdown.repetition).toBeLessThan(plain.breakdown.repetition);
+  });
+
+  it("rotates away from what the last few weeks already had", () => {
+    const third = recipe({
+      id: "third",
+      name: "A third option",
+      lines: [
+        { ingredientId: "chicken", grams: 175, isScalable: true, minGrams: 120, maxGrams: 250 },
+        { ingredientId: "onion", grams: 90, isScalable: false, minGrams: null, maxGrams: null },
+        { ingredientId: "rice", grams: 65, isScalable: true, minGrams: 45, maxGrams: 105 },
+      ],
+    });
+    const shared = {
+      candidates: [cheap, dearer, third],
+      brief: brief({ occasions: [{ mealType: "dinner", count: 4 }], minDistinct: {} }),
+    };
+    const uses = (s: ReturnType<typeof solve>, id: string) =>
+      s.cooks.filter((c) => c.recipeId === id).reduce((n, c) => n + c.occasions, 0);
+
+    const withoutHistory = solve(input(shared));
+    const withHistory = solve(input({ ...shared, recentRecipeIds: ["cheap"] }));
+
+    expect(uses(withHistory, "cheap")).toBeLessThan(uses(withoutHistory, "cheap"));
+  });
+
+  it("still lets a favourite come back despite being recent", () => {
+    // Recency is a nudge, not a ban — the library is finite.
+    const solution = solve(
+      input({
+        candidates: [cheap],
+        brief: brief({ occasions: [{ mealType: "dinner", count: 2 }], minDistinct: {} }),
+        recentRecipeIds: ["cheap"],
+      }),
+    );
+    expect(solution.cooks.reduce((n, c) => n + c.occasions, 0)).toBe(2);
   });
 });

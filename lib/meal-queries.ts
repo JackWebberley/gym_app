@@ -233,6 +233,23 @@ export async function getCurrentMenu() {
   });
 }
 
+/**
+ * Recipes the last few plans already used.
+ *
+ * Without this every week re-solves the same question against the same library
+ * and converges on the same cheapest handful — the plan is "optimal" and you eat
+ * gammon four times running. Feeding recent history back in rotates the library
+ * without anyone having to curate it.
+ */
+export async function getRecentRecipeIds(menus = 3): Promise<string[]> {
+  const recent = await db.menu.findMany({
+    orderBy: { createdAt: "desc" },
+    take: menus,
+    select: { cooks: { select: { recipeId: true } } },
+  });
+  return [...new Set(recent.flatMap((m) => m.cooks.map((c) => c.recipeId)))];
+}
+
 export type PlanSummary = Awaited<ReturnType<typeof getMenuList>>[number];
 
 /** Every plan, for the switcher. */

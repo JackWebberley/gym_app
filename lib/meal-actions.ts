@@ -9,6 +9,7 @@ import {
   getHouseholdSettings,
   getPantryStock,
   getPlanningContext,
+  getRecentRecipeIds,
   safeParseBrief,
   toRecipeSpec,
 } from "./meal-queries";
@@ -94,12 +95,14 @@ export async function planMenu(input: {
     }
 
     const seed = input.seed ?? Math.floor(Math.random() * 1_000_000);
+    const recentRecipeIds = await getRecentRecipeIds();
     const solution = solve({
       brief: { ...brief, cooksForTwo: context.cooksForTwo },
       candidates: context.recipes,
       ingredients: context.ingredients,
       pantry: context.pantry,
       envelopes: context.envelopes,
+      recentRecipeIds,
       seed,
       horizonDayKey: shiftDayKey(brief.weekStart, 7),
     });
@@ -319,6 +322,11 @@ export async function rerollMenu(menuId: string): Promise<PlanResult> {
 
   const context = await getPlanningContext();
   const seed = Math.floor(Math.random() * 1_000_000);
+  // Skip the most recent plan: it is the one being rerolled, and counting its own
+  // recipes as "recent" would just penalise everything currently on screen.
+  const recentRecipeIds = (await getRecentRecipeIds(4)).filter(
+    (id) => !menu.cooks.some((c) => c.recipeId === id),
+  );
 
   const solution = solve({
     brief: { ...brief, cooksForTwo: context.cooksForTwo },
@@ -326,6 +334,7 @@ export async function rerollMenu(menuId: string): Promise<PlanResult> {
     ingredients: context.ingredients,
     pantry: context.pantry,
     envelopes: context.envelopes,
+    recentRecipeIds,
     locked,
     seed,
     horizonDayKey: shiftDayKey(brief.weekStart, 7),
