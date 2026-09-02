@@ -556,17 +556,41 @@ export async function deleteCookGroup(input: { menuId: string; recipeId: string 
   revalidatePool(input.menuId);
 }
 
-/** Removes one cook of a dish, leaving the rest — the "×3 → ×2" case. */
+/**
+ * Takes one serving off a dish, leaving the rest — the "×5 → ×4" case.
+ *
+ * What "one" means depends on how the dish is cooked, and getting that wrong is
+ * destructive. Several separate cooks of the same recipe: drop one cook. A single
+ * batch cook covering five servings: drop one *serving*, because deleting the
+ * cook would take all five with it — which is exactly what this did before.
+ */
 export async function deleteOneOfGroup(input: { menuId: string; recipeId: string }) {
-  // Drop an uncooked one first: cooked food exists and should not vanish from
-  // the plan just because the count came down.
-  const candidates = await db.menuCook.findMany({
+  const cooks = await db.menuCook.findMany({
     where: { menuId: input.menuId, recipeId: input.recipeId },
+    include: { portions: true },
+    // Uncooked first: cooked food exists, and should not vanish from the plan
+    // just because the count came down.
     orderBy: [{ cookedAt: { sort: "asc", nulls: "first" } }, { order: "desc" }],
-    take: 1,
   });
-  if (candidates.length === 0) return;
-  await db.menuCook.delete({ where: { id: candidates[0].id } }).catch(() => {});
+  if (cooks.length === 0) return;
+
+  if (cooks.length > 1) {
+    await db.menuCook.delete({ where: { id: cooks[0].id } }).catch(() => {});
+  } else {
+    const cook = cooks[0];
+    const mine = cook.portions.filter((p) => p.eater === "me" && p.status === "planned");
+    const theirs = cook.portions.filter((p) => p.eater === "partner" && p.status === "planned");
+
+    if (mine.length <= 1) {
+      // Last serving standing: the cook itself is what is being removed.
+      await db.menuCook.delete({ where: { id: cook.id } }).catch(() => {});
+    } else {
+      // One serving is one meal for each of us, so both portions go.
+      const ids = [mine[0].id, ...(theirs[0] ? [theirs[0].id] : [])];
+      await db.portion.deleteMany({ where: { id: { in: ids } } });
+    }
+  }
+
   await recostMenu(input.menuId);
   revalidatePool(input.menuId);
 }
