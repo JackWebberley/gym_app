@@ -5,10 +5,14 @@ import { db } from "./db";
 import { formatDayKey, isValidDayKey, shiftDayKey, todayKey } from "./day";
 import { getOrCreateDay } from "./nutrition-queries";
 import {
+  getCooksForTwo,
+  getHouseholdSettings,
+  getPantryStock,
   getPlanningContext,
   safeParseBrief,
   toRecipeSpec,
 } from "./meal-queries";
+import { buildEnvelopes } from "./meal/envelopes";
 import { solve, type LockedCook } from "./meal/optimiser";
 import { WORTH_KEEPING_GRAMS, buildBasket } from "./meal/basket";
 import { ingredientNeeds, mergeNeeds, roundMacros, scaleForTarget, indexIngredients } from "./meal/portions";
@@ -376,36 +380,63 @@ export async function swapCook(input: { cookId: string; recipeId: string }) {
   });
   if (!recipe) throw new Error("That recipe no longer exists.");
 
-  const context = await getPlanningContext();
-  const index = indexIngredients(context.ingredients);
+  // Only the incoming recipe's own ingredients are needed to scale it — not the
+  // whole library, which is what this used to load to swap a single dish.
+  const [settings, cooksForTwo, rows] = await Promise.all([
+    getHouseholdSettings(),
+    getCooksForTwo(),
+    db.ingredient.findMany({
+      where: { id: { in: recipe.items.map((i) => i.ingredientId) } },
+    }),
+  ]);
+
+  const envelopes = buildEnvelopes(settings);
+  const index = indexIngredients(
+    rows.map((i) => ({
+      id: i.id,
+      name: i.name,
+      aisle: i.aisle,
+      isStaple: i.isStaple,
+      shelfLifeDays: i.shelfLifeDays,
+      freezable: i.freezable,
+      unitGrams: i.unitGrams,
+      kcalPer100g: i.kcalPer100g,
+      proteinPer100g: i.proteinPer100g,
+      carbsPer100g: i.carbsPer100g,
+      fatPer100g: i.fatPer100g,
+      packs: [],
+    })),
+  );
   const spec = toRecipeSpec(recipe);
 
   const occasions = cook.portions.filter((p) => p.eater === "me").length;
-  const eaters: Eater[] = context.cooksForTwo ? ["me", "partner"] : ["me"];
+  const eaters: Eater[] = cooksForTwo ? ["me", "partner"] : ["me"];
 
   await db.$transaction([
     db.portion.deleteMany({ where: { menuCookId: cook.id } }),
     db.menuCook.update({ where: { id: cook.id }, data: { recipeId: recipe.id } }),
   ]);
 
+  const fresh = [];
   for (let i = 0; i < occasions; i++) {
     for (const eater of eaters) {
-      const envelope = context.envelopes[eater][spec.mealType];
+      const envelope = envelopes[eater][spec.mealType];
       const scaled = scaleForTarget(spec, index, envelope.targetKcal);
       const macros = roundMacros(scaled.macros);
-      await db.portion.create({
-        data: {
-          menuCookId: cook.id,
-          eater,
-          scaleFactor: Math.round(scaled.scale * 1000) / 1000,
-          calories: macros.calories,
-          proteinG: macros.proteinG,
-          carbsG: macros.carbsG,
-          fatG: macros.fatG,
-        },
+      fresh.push({
+        menuCookId: cook.id,
+        eater,
+        scaleFactor: Math.round(scaled.scale * 1000) / 1000,
+        calories: macros.calories,
+        proteinG: macros.proteinG,
+        carbsG: macros.carbsG,
+        fatG: macros.fatG,
       });
     }
   }
+  // One insert, not one per portion: each round trip is a serialised hop to the
+  // database from the Worker.
+  if (fresh.length > 0) await db.portion.createMany({ data: fresh });
 
   await recostMenu(cook.menuId);
   revalidatePool();
@@ -469,11 +500,11 @@ export async function clearMenuCooks(menuId: string) {
 
 /** Recomputes the basket for a menu from its current cooks. */
 async function recostMenu(menuId: string) {
-  const { needs, context } = await menuNeeds(menuId);
+  const { needs, ingredients, pantry } = await menuNeeds(menuId);
   const menu = await db.menu.findUnique({ where: { id: menuId } });
   if (!menu) return;
 
-  const basket = buildBasket(needs, context.ingredients, context.pantry, {
+  const basket = buildBasket(needs, ingredients, pantry, {
     horizonDayKey: shiftDayKey(menu.weekStart, 7),
   });
 
@@ -486,15 +517,32 @@ async function recostMenu(menuId: string) {
   });
 }
 
+/**
+ * Everything needed to price one menu — and nothing else.
+ *
+ * This used to call `getPlanningContext()`, which loads the entire library so
+ * the optimiser can search it. That is right for planning and badly wrong for
+ * recosting: removing a single cook was pulling 118 recipes, 206 ingredients and
+ * their packs — about 1,300 rows — to recompute a basket that touches perhaps
+ * thirty of them. On Workers, where the connection pool is one per request and
+ * the queries therefore run end to end, that was enough to make delete and swap
+ * appear to do nothing and then quietly succeed a while later.
+ *
+ * Ingredients are loaded for what the menu actually uses, plus whatever is in the
+ * pantry — the pantry ones matter because expiring stock the menu ignores is
+ * still charged as waste, and dropping them would silently understate it.
+ */
 async function menuNeeds(menuId: string) {
-  const context = await getPlanningContext();
-  const cooks = await db.menuCook.findMany({
-    where: { menuId },
-    include: {
-      recipe: { include: { items: { orderBy: { order: "asc" } } } },
-      portions: true,
-    },
-  });
+  const [cooks, pantry] = await Promise.all([
+    db.menuCook.findMany({
+      where: { menuId },
+      include: {
+        recipe: { include: { items: { orderBy: { order: "asc" } } } },
+        portions: true,
+      },
+    }),
+    getPantryStock(),
+  ]);
 
   const needs = mergeNeeds(
     cooks.map((cook) =>
@@ -505,7 +553,33 @@ async function menuNeeds(menuId: string) {
     ),
   );
 
-  return { needs, context, cooks };
+  const wanted = new Set<string>([...needs.keys(), ...pantry.map((p) => p.ingredientId)]);
+  const rows = wanted.size
+    ? await db.ingredient.findMany({ where: { id: { in: [...wanted] } }, include: { packs: true } })
+    : [];
+
+  const ingredients: IngredientSpec[] = rows.map((i) => ({
+    id: i.id,
+    name: i.name,
+    aisle: i.aisle,
+    isStaple: i.isStaple,
+    shelfLifeDays: i.shelfLifeDays,
+    freezable: i.freezable,
+    unitGrams: i.unitGrams,
+    kcalPer100g: i.kcalPer100g,
+    proteinPer100g: i.proteinPer100g,
+    carbsPer100g: i.carbsPer100g,
+    fatPer100g: i.fatPer100g,
+    packs: i.packs.map((p) => ({
+      id: p.id,
+      label: p.label,
+      grams: p.grams,
+      priceGbp: p.priceGbp,
+      isDivisible: p.isDivisible,
+    })),
+  }));
+
+  return { needs, ingredients, pantry, cooks };
 }
 
 /**
@@ -519,14 +593,14 @@ export async function confirmMenu(menuId: string) {
   const menu = await db.menu.findUnique({ where: { id: menuId } });
   if (!menu) throw new Error("That menu no longer exists.");
 
-  const { needs, context } = await menuNeeds(menuId);
-  const basket = buildBasket(needs, context.ingredients, context.pantry, {
+  const { needs, ingredients, pantry } = await menuNeeds(menuId);
+  const basket = buildBasket(needs, ingredients, pantry, {
     horizonDayKey: shiftDayKey(menu.weekStart, 7),
   });
 
   const packIdByIngredient = new Map<string, string | null>();
   for (const line of basket.lines) {
-    const ingredient = context.ingredients.find((i) => i.id === line.ingredientId);
+    const ingredient = ingredients.find((i) => i.id === line.ingredientId);
     const choice = ingredient ? cheapestPacks(ingredient.packs, line.gramsToBuy) : null;
     packIdByIngredient.set(line.ingredientId, choice?.packId ?? null);
   }
@@ -544,9 +618,12 @@ export async function confirmMenu(menuId: string) {
     }),
   ]);
 
-  for (const line of basket.lines) {
-    await db.shoppingLine.create({
-      data: {
+  // One insert for the whole list. A shop runs to thirty-odd lines and each
+  // `create` is a separate serialised round trip from the Worker, which is most
+  // of what made confirming a menu feel like it had hung.
+  if (basket.lines.length > 0) {
+    await db.shoppingLine.createMany({
+      data: basket.lines.map((line) => ({
         menuId,
         ingredientId: line.ingredientId,
         packSizeId: packIdByIngredient.get(line.ingredientId) ?? null,
@@ -557,7 +634,7 @@ export async function confirmMenu(menuId: string) {
         surplusGrams: line.surplusGrams,
         priceGbp: line.priceGbp,
         wasteCostGbp: line.wasteCostGbp,
-      },
+      })),
     });
   }
 
