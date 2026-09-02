@@ -3,11 +3,12 @@
 import { useRef, useState, useTransition } from "react";
 import { finishSession, logSet, unlogSet } from "@/lib/actions";
 import type { SessionScreen } from "@/lib/queries";
-import { Badge, Button, Card, Eyebrow, Note, Select, cx } from "@/components/ui";
+import { Badge, Button, Card, Eyebrow, Note, cx } from "@/components/ui";
 import type { BadgeTone } from "@/components/ui";
 import { RestTimerBar, startRest } from "./rest-timer";
+import { ExercisePicker, type PickerExercise } from "./exercise-picker";
 
-type ExerciseOption = { id: string; name: string; muscleGroup: string; restSeconds: number };
+type ExerciseOption = PickerExercise;
 
 type Row = {
   setNumber: number;
@@ -203,7 +204,7 @@ export function SessionLogger({
         exerciseId: option.id,
         name: option.name,
         muscleGroup: option.muscleGroup,
-        equipment: "",
+        equipment: option.equipment,
         notes: null,
         restSeconds: option.restSeconds,
         targetSets: 3,
@@ -331,34 +332,12 @@ export function SessionLogger({
 
       <div className="px-4 pt-4">
         {addingExercise ? (
-          <Card className="p-4">
-            <Eyebrow className="mb-2">Add an exercise</Eyebrow>
-            <Select
-              autoFocus
-              defaultValue=""
-              onChange={(e) => {
-                const option = library.find((o) => o.id === e.target.value);
-                if (option) addExercise(option);
-              }}
-            >
-              <option value="" disabled>
-                Choose an exercise…
-              </option>
-              {library.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.name} · {option.muscleGroup}
-                </option>
-              ))}
-            </Select>
-            <Button
-              variant="ghost"
-              fullWidth
-              className="mt-2"
-              onClick={() => setAddingExercise(false)}
-            >
-              Cancel
-            </Button>
-          </Card>
+          <ExercisePicker
+            library={library}
+            addedIds={new Set(exercises.map((e) => e.exerciseId))}
+            onPick={addExercise}
+            onCancel={() => setAddingExercise(false)}
+          />
         ) : (
           <Button variant="secondary" fullWidth onClick={() => setAddingExercise(true)}>
             + Add an exercise

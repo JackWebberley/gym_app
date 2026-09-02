@@ -15,11 +15,23 @@ export default async function TrainPage({ params }: { params: Promise<{ sessionI
   // A finished session is history, not a logging screen.
   if (session.endedAt) redirect(`/history/${sessionId}`);
 
-  const library = await db.exercise.findMany({
-    where: { isArchived: false },
-    orderBy: [{ muscleGroup: "asc" }, { name: "asc" }],
-    select: { id: true, name: true, muscleGroup: true, restSeconds: true },
-  });
+  // equipment and the set count are here for the picker: it searches on the
+  // former and ranks ties by the latter, so the movements you actually do come
+  // up first.
+  const library = (
+    await db.exercise.findMany({
+      where: { isArchived: false },
+      orderBy: [{ muscleGroup: "asc" }, { name: "asc" }],
+      select: {
+        id: true,
+        name: true,
+        muscleGroup: true,
+        equipment: true,
+        restSeconds: true,
+        _count: { select: { sets: true } },
+      },
+    })
+  ).map(({ _count, ...exercise }) => ({ ...exercise, setCount: _count.sets }));
 
   const started = new Date(session.startedAt);
 
