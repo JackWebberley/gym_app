@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { todayKey, shiftDayKey, formatDayKey } from "@/lib/day";
 import { db } from "@/lib/db";
-import { isGenerationConfigured } from "@/lib/meal-queries";
 import { PageHeader } from "@/components/ui";
 import { PlanForm } from "./plan-form";
 
@@ -20,18 +19,11 @@ export default async function PlanPage() {
   const today = todayKey();
   const weekStart = weekStartKey(today);
 
-  const [grouped, ingredients] = await Promise.all([
-    db.recipe.groupBy({
-      by: ["mealType"],
-      where: { isArchived: false },
-      _count: { _all: true },
-    }),
-    db.ingredient.findMany({
-      where: { isStaple: false },
-      select: { id: true, name: true },
-      orderBy: { name: "asc" },
-    }),
-  ]);
+  const grouped = await db.recipe.groupBy({
+    by: ["mealType"],
+    where: { isArchived: false },
+    _count: { _all: true },
+  });
 
   const libraryByMealType = Object.fromEntries(
     grouped.map((g) => [g.mealType, g._count._all]),
@@ -49,12 +41,7 @@ export default async function PlanPage() {
           </Link>
         }
       />
-      <PlanForm
-        weekStart={weekStart}
-        canGenerate={isGenerationConfigured()}
-        libraryByMealType={libraryByMealType}
-        ingredients={ingredients}
-      />
+      <PlanForm weekStart={weekStart} libraryByMealType={libraryByMealType} />
     </main>
   );
 }

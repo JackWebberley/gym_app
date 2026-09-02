@@ -3,61 +3,40 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { planMenu } from "@/lib/meal-actions";
-import type { CookConfidence, MealType } from "@/lib/meal/types";
-import {
-  Button,
-  Card,
-  Eyebrow,
-  Hint,
-  Input,
-  Label,
-  Note,
-  SectionHeader,
-  cx,
-} from "@/components/ui";
+import type { MealType } from "@/lib/meal/types";
+import { Button, Card, Eyebrow, Hint, Input, Label, Note } from "@/components/ui";
 
-/// The brief.
+/// The brief: a name, and how many of each meal.
 ///
 /// The spec asks "how many breakfasts, lunches, dinners" and then pins each to a
 /// date. This asks the same counts but never asks *when* — because the honest
 /// answer here is "we do not know", and a plan that pretends otherwise is wrong
-/// by Tuesday. What it asks instead is how confident the week is, which the
-/// optimiser turns into a preference for food that survives a change of plan.
+/// by Tuesday.
+///
+/// Everything else the optimiser accepts is assumed rather than asked. A form
+/// with five sections is a form you stop filling in, and the answers were the
+/// same every week: the cooking schedule is unreliable, there is no prep-time
+/// limit worth enforcing, nothing is off the menu, and yes — write new recipes
+/// if the library runs short. Those inputs still exist and are still honoured;
+/// they are just no longer questions.
 
-const CONFIDENCE: { value: CookConfidence; label: string; hint: string }[] = [
-  {
-    value: "flexible",
-    label: "Who knows",
-    hint: "We will probably eat out once or twice. Lean hard on things that keep and freeze.",
-  },
-  {
-    value: "likely",
-    label: "Fairly sure",
-    hint: "Most of these will get cooked. Some caution about anything that spoils fast.",
-  },
-  {
-    value: "certain",
-    label: "Locked in",
-    hint: "We are cooking all of these. Fresh ingredients are fine.",
-  },
-];
+/// Unreliable, which is the truthful setting for this house. The optimiser reads
+/// it as "prefer food that keeps", so being wrong about a night costs nothing.
+const ASSUMED_CONFIDENCE = "flexible" as const;
 
 type Counts = Record<"breakfast" | "lunch" | "dinner", { count: number; distinct: number }>;
 
 export function PlanForm({
   weekStart,
-  canGenerate,
   libraryByMealType,
-  ingredients,
 }: {
   weekStart: string;
-  canGenerate: boolean;
   libraryByMealType: Record<string, number>;
-  ingredients: { id: string; name: string }[];
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
+  const [name, setName] = useState("");
   // Distinct counts default high rather than low. Repetition is always cheaper,
   // so a permissive floor plus a cheap dish produces the same breakfast four
   // days running — technically optimal, and the first thing anyone complains
@@ -67,11 +46,6 @@ export function PlanForm({
     lunch: { count: 5, distinct: 4 },
     dinner: { count: 4, distinct: 4 },
   });
-  const [name, setName] = useState("");
-  const [confidence, setConfidence] = useState<CookConfidence>("flexible");
-  const [maxPrep, setMaxPrep] = useState<string>("");
-  const [avoid, setAvoid] = useState<string[]>([]);
-  const [allowGeneration, setAllowGeneration] = useState(canGenerate);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -112,12 +86,14 @@ export function PlanForm({
           weekStart,
           occasions,
           minDistinct,
-          cookConfidence: confidence,
-          maxPrepMinutes: maxPrep.trim() ? Number(maxPrep) : null,
-          avoidIngredientIds: avoid,
+          cookConfidence: ASSUMED_CONFIDENCE,
+          maxPrepMinutes: null,
+          avoidIngredientIds: [],
           cooksForTwo: true,
         },
-        allowGeneration,
+        // Always on. There is no longer a switch, so a missing API key must
+        // degrade to planning from the library rather than failing the week.
+        allowGeneration: true,
       });
 
       if (result.kind === "error") {
@@ -126,7 +102,7 @@ export function PlanForm({
       }
       if (result.gaps.length > 0) {
         setNotice(
-          `No recipes for ${result.gaps.map((g) => `${g.count} ${g.mealType}`).join(", ")} — add some to the library, or allow generation.`,
+          `No recipes for ${result.gaps.map((g) => `${g.count} ${g.mealType}`).join(", ")} — add some to the library.`,
         );
       }
       router.push(`/meals/${result.menuId}`);
@@ -185,97 +161,8 @@ export function PlanForm({
         </div>
         <Hint>
           Fewer different recipes is cheaper and wastes less — one cook consumes whole packs by
-          construction. The menu screen shows what each extra recipe actually costs.
+          construction. Turn these down to save money.
         </Hint>
-      </Card>
-
-      <Card>
-        <Eyebrow className="mb-3">How likely is the week</Eyebrow>
-        <div className="grid gap-2">
-          {CONFIDENCE.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              onClick={() => setConfidence(option.value)}
-              className={cx(
-                "rounded-md border px-3 py-2.5 text-left transition-colors duration-(--dur-fast)",
-                confidence === option.value
-                  ? "border-line-accent bg-accent-soft"
-                  : "border-hairline bg-card hover:bg-sunken",
-              )}
-            >
-              <span className="block text-body-sm font-medium text-fg-strong">{option.label}</span>
-              <span className="mt-0.5 block text-caption text-fg-muted">{option.hint}</span>
-            </button>
-          ))}
-        </div>
-        <Hint>
-          This is the setting that replaces a calendar. Nothing gets assigned to a day; instead an
-          uncertain week is planned with food that keeps, so eating out costs you nothing.
-        </Hint>
-      </Card>
-
-      <Card>
-        <Eyebrow className="mb-3">Constraints</Eyebrow>
-        <Label htmlFor="max-prep">Longest you want to spend cooking (minutes)</Label>
-        <Input
-          id="max-prep"
-          value={maxPrep}
-          inputMode="numeric"
-          placeholder="no limit"
-          onChange={(e) => setMaxPrep(e.target.value.replace(/[^\d]/g, ""))}
-        />
-
-        <div className="mt-4">
-          <Label htmlFor="avoid">Anything to avoid this week</Label>
-          <div className="flex flex-wrap gap-1.5">
-            {ingredients.slice(0, 40).map((ingredient) => {
-              const selected = avoid.includes(ingredient.id);
-              return (
-                <button
-                  key={ingredient.id}
-                  type="button"
-                  onClick={() =>
-                    setAvoid((prev) =>
-                      selected ? prev.filter((id) => id !== ingredient.id) : [...prev, ingredient.id],
-                    )
-                  }
-                  className={cx(
-                    "inline-flex h-[26px] items-center rounded-sm border px-2.5 font-mono text-micro tracking-wide whitespace-nowrap transition-colors",
-                    selected
-                      ? "border-inverse bg-inverse text-fg-inverse"
-                      : "border-hairline bg-transparent text-fg-muted hover:bg-sunken",
-                  )}
-                >
-                  {ingredient.name}
-                </button>
-              );
-            })}
-          </div>
-          <Hint>Anything selected is excluded outright, not merely discouraged.</Hint>
-        </div>
-      </Card>
-
-      <Card>
-        <label className="flex items-start gap-3">
-          <input
-            type="checkbox"
-            checked={allowGeneration}
-            disabled={!canGenerate}
-            onChange={(e) => setAllowGeneration(e.target.checked)}
-            className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--accent)]"
-          />
-          <span className="min-w-0">
-            <span className="block text-body-sm font-medium text-fg-strong">
-              Write new recipes if the library is short
-            </span>
-            <span className="mt-0.5 block text-caption text-fg-muted">
-              {canGenerate
-                ? "Only for what the library cannot cover, and always built around ingredients you are already buying. Anything written is saved, so it is asked less every week."
-                : "Needs ANTHROPIC_API_KEY in .env. The planner still works from recipes already in your library."}
-            </span>
-          </span>
-        </label>
       </Card>
 
       {error ? <Note tone="danger">{error}</Note> : null}
@@ -286,8 +173,9 @@ export function PlanForm({
           {isPending ? "Working out the shop…" : `Plan ${totalMeals} meals`}
         </Button>
         <Hint>
-          Every meal is cooked for two, sized differently for each of you. Only your own servings
-          reach your calorie log.
+          Cooked for two and sized differently for each of you, planned around food that keeps
+          so eating out on a whim costs nothing, and topped up with new recipes if the library
+          runs short. Only your own servings reach your calorie log.
         </Hint>
       </div>
     </div>
@@ -342,10 +230,7 @@ function Stepper({
   );
 }
 
-function StepButton({
-  children,
-  ...props
-}: React.ComponentProps<"button">) {
+function StepButton({ children, ...props }: React.ComponentProps<"button">) {
   return (
     <button
       type="button"

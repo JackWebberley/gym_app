@@ -89,8 +89,19 @@ export async function planMenu(input: {
     if (input.allowGeneration) {
       const shortfall = shortfallByMealType(brief, context.recipes);
       if (shortfall.length > 0) {
-        generated = await topUpLibrary(brief, shortfall, context);
-        if (generated > 0) context = await getPlanningContext();
+        // Generation is a top-up, not a prerequisite. The plan screen no longer
+        // offers a switch for it, so a missing API key — or any failure reaching
+        // the model — must fall back to planning from the library rather than
+        // taking the whole week down with it.
+        try {
+          generated = await topUpLibrary(brief, shortfall, context);
+          if (generated > 0) context = await getPlanningContext();
+        } catch (e) {
+          console.error(
+            "Recipe generation failed; planning from the library only:",
+            e instanceof Error ? e.message : String(e),
+          );
+        }
       }
     }
 
