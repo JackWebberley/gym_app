@@ -58,10 +58,14 @@ export function PlanForm({
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
+  // Distinct counts default high rather than low. Repetition is always cheaper,
+  // so a permissive floor plus a cheap dish produces the same breakfast four
+  // days running — technically optimal, and the first thing anyone complains
+  // about. Turn them down to save money, rather than up to avoid boredom.
   const [counts, setCounts] = useState<Counts>({
-    breakfast: { count: 5, distinct: 2 },
-    lunch: { count: 5, distinct: 2 },
-    dinner: { count: 4, distinct: 3 },
+    breakfast: { count: 5, distinct: 3 },
+    lunch: { count: 5, distinct: 4 },
+    dinner: { count: 4, distinct: 4 },
   });
   const [name, setName] = useState("");
   const [confidence, setConfidence] = useState<CookConfidence>("flexible");

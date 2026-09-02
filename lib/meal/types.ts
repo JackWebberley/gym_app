@@ -134,7 +134,7 @@ export const DEFAULT_BRIEF: Omit<Brief, "weekStart"> = {
     { mealType: "lunch", count: 5 },
     { mealType: "dinner", count: 4 },
   ],
-  minDistinct: { breakfast: 2, lunch: 2, dinner: 3 },
+  minDistinct: { breakfast: 3, lunch: 4, dinner: 4 },
   cookConfidence: "flexible",
   maxPrepMinutes: null,
   avoidIngredientIds: [],
