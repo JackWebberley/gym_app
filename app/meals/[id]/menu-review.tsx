@@ -114,6 +114,12 @@ export function MenuReview({
           Waste is weighted by how fast a thing goes off, not by how much is left over. A spare
           half-bag of potatoes barely counts; a spare bunch of basil counts almost in full.
         </Hint>
+        {menu.status !== "draft" ? (
+          <Hint>
+            Marking a dish cooked logs one serving against today. A batch makes several meals and
+            you have only eaten one, so the rest stay in the pool as leftovers.
+          </Hint>
+        ) : null}
       </Card>
 
       {error ? <Note tone="danger">{error}</Note> : null}

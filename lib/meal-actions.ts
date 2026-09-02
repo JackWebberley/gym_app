@@ -866,15 +866,27 @@ export async function markShopped(menuId: string) {
 
 /* ── Cooking and eating ────────────────────────────────────────────────────── */
 
-/** Cooking starts the clock: only now does a portion begin to perish. */
-export async function markCooked(cookId: string) {
+/**
+ * Cooking starts the clock, and eats one serving.
+ *
+ * You cooked it because you were about to eat it, so the plan should not then ask
+ * you to say so a second time on another screen. Marking a dish cooked logs a
+ * single serving against today and leaves the rest in the pool as leftovers —
+ * one, not all of them, because a batch cook makes five meals and you did not
+ * just eat five.
+ *
+ * The macros come from the recipe, so this is still the most accurate entry the
+ * app can make and it costs no API call (spec §8.8).
+ */
+export async function markCooked(cookId: string, options: { alsoEat?: boolean } = {}) {
   const cook = await db.menuCook.findUnique({
     where: { id: cookId },
     include: { recipe: true },
   });
   if (!cook) throw new Error("That cook is no longer in the menu.");
 
-  const expiresOn = shiftDayKey(todayKey(), cook.recipe.keepsDays);
+  const today = todayKey();
+  const expiresOn = shiftDayKey(today, cook.recipe.keepsDays);
 
   await db.$transaction([
     db.menuCook.update({ where: { id: cookId }, data: { cookedAt: new Date() } }),
@@ -888,11 +900,28 @@ export async function markCooked(cookId: string) {
     }),
   ]);
 
-  revalidatePool(cook.menuId);
+  if (options.alsoEat !== false) {
+    const mine = await db.portion.findFirst({
+      where: { menuCookId: cookId, eater: "me", status: "planned" },
+    });
+    if (mine) await eatPortion({ portionId: mine.id, dayKey: today });
+  }
+
+  revalidateLog(cook.menuId);
 }
 
+/** Undoes both halves of marking it cooked, including the serving that was logged. */
 export async function markNotCooked(cookId: string) {
   const cook = await db.menuCook.findUnique({ where: { id: cookId }, select: { menuId: true } });
+
+  // Release the most recently eaten serving first, so undoing a mistaken tap
+  // takes the calories back out of today rather than stranding them.
+  const eaten = await db.portion.findFirst({
+    where: { menuCookId: cookId, eater: "me", status: "eaten" },
+    orderBy: { eatenOn: "desc" },
+  });
+  if (eaten) await uneatPortion(eaten.id);
+
   await db.$transaction([
     db.menuCook.update({ where: { id: cookId }, data: { cookedAt: null } }),
     db.portion.updateMany({
@@ -900,7 +929,7 @@ export async function markNotCooked(cookId: string) {
       data: { expiresOn: null },
     }),
   ]);
-  revalidatePool(cook?.menuId);
+  revalidateLog(cook?.menuId);
 }
 
 /**

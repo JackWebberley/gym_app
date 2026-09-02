@@ -177,6 +177,52 @@ export function DayView({
         </Hint>
       </Card>
 
+      {/* ── Today's entries ─────────────────────────────────────────────── */}
+      <section>
+        <SectionHeader title={`Logged (${day.entries.length})`} />
+        {day.entries.length === 0 ? (
+          <p className="rounded-lg border border-dashed border-line px-4 py-6 text-center text-body-sm text-fg-muted">
+            Nothing logged yet today.
+          </p>
+        ) : (
+          <ul className="divide-y divide-hairline overflow-hidden rounded-lg border border-hairline bg-card">
+            {day.entries.map((entry) => (
+              <li key={entry.id} className="flex items-start gap-3 px-4 py-3">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-body-sm text-fg-strong">{entry.description}</p>
+                  <p className="font-mono text-micro tracking-wide text-fg-faint">
+                    {entry.calories} KCAL · {entry.proteinG.toFixed(1)}P ·{" "}
+                    {entry.carbsG.toFixed(0)}C · {entry.fatG.toFixed(0)}F
+                  </p>
+                  {entry.assumptions ? (
+                    <p className="mt-1 text-caption text-fg-muted">Assumed: {entry.assumptions}</p>
+                  ) : null}
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <Tag>{entry.source}</Tag>
+                  <button
+                    type="button"
+                    aria-label={`Delete ${entry.description}`}
+                    disabled={isPending}
+                    onClick={() =>
+                      startTransition(async () => {
+                        await deleteEntry(entry.id);
+                        router.refresh();
+                      })
+                    }
+                    className={cx(
+                      "h-8 w-8 rounded-pill border border-hairline text-fg-muted transition-colors hover:bg-sunken hover:text-fg-strong",
+                    )}
+                  >
+                    ✕
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
       {/* ── Draft preview, or the input ─────────────────────────────────── */}
       {drafts ? (
         <Card tone="accent">
@@ -329,8 +375,6 @@ export function DayView({
         </Card>
       )}
 
-      {/* ── Planned servings ────────────────────────────────────────────── */}
-      <ReadyNow pool={pool} dayKey={day.dayKey} caloriesLeft={day.calories.left} />
 
       {/* ── Quick add ───────────────────────────────────────────────────── */}
       {day.quickAdd.length > 0 ? (
@@ -365,51 +409,8 @@ export function DayView({
         </section>
       ) : null}
 
-      {/* ── Today's entries ─────────────────────────────────────────────── */}
-      <section>
-        <SectionHeader title={`Logged (${day.entries.length})`} />
-        {day.entries.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-line px-4 py-6 text-center text-body-sm text-fg-muted">
-            Nothing logged yet today.
-          </p>
-        ) : (
-          <ul className="divide-y divide-hairline overflow-hidden rounded-lg border border-hairline bg-card">
-            {day.entries.map((entry) => (
-              <li key={entry.id} className="flex items-start gap-3 px-4 py-3">
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-body-sm text-fg-strong">{entry.description}</p>
-                  <p className="font-mono text-micro tracking-wide text-fg-faint">
-                    {entry.calories} KCAL · {entry.proteinG.toFixed(1)}P ·{" "}
-                    {entry.carbsG.toFixed(0)}C · {entry.fatG.toFixed(0)}F
-                  </p>
-                  {entry.assumptions ? (
-                    <p className="mt-1 text-caption text-fg-muted">Assumed: {entry.assumptions}</p>
-                  ) : null}
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <Tag>{entry.source}</Tag>
-                  <button
-                    type="button"
-                    aria-label={`Delete ${entry.description}`}
-                    disabled={isPending}
-                    onClick={() =>
-                      startTransition(async () => {
-                        await deleteEntry(entry.id);
-                        router.refresh();
-                      })
-                    }
-                    className={cx(
-                      "h-8 w-8 rounded-pill border border-hairline text-fg-muted transition-colors hover:bg-sunken hover:text-fg-strong",
-                    )}
-                  >
-                    ✕
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+      {/* ── Planned servings ────────────────────────────────────────────── */}
+      <ReadyNow pool={pool} dayKey={day.dayKey} caloriesLeft={day.calories.left} />
     </div>
   );
 }

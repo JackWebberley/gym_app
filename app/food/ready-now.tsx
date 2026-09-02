@@ -61,7 +61,7 @@ export function ReadyNow({
   return (
     <section>
       <SectionHeader
-        title="Ready to eat"
+        title="Planned meals"
         action={
           <Link href="/meals" className="text-caption">
             The menu →
@@ -218,7 +218,7 @@ function PortionCard({
             disabled={isPending}
             onClick={() => run(() => markCooked(portion.cookId))}
           >
-            Cook one{many ? ` of ${group.count}` : ""}
+            Cook &amp; log one
           </Button>
         ) : null}
 
