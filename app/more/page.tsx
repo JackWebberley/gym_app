@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { getGoals } from "@/lib/nutrition-queries";
+import { getWeightSummary } from "@/lib/track-queries";
 import { Card, Eyebrow, PageHeader, SectionHeader } from "@/components/ui";
 import { ThemeToggle } from "@/components/theme-toggle";
 
@@ -55,7 +56,7 @@ function Group({ title, children }: { title: string; children: React.ReactNode }
 }
 
 export default async function MorePage() {
-  const [groupCount, cycleCount, exerciseCount, sessionCount, savedFoodCount, goals] =
+  const [groupCount, cycleCount, exerciseCount, sessionCount, savedFoodCount, goals, body] =
     await Promise.all([
       db.exerciseGroup.count({ where: { isArchived: false } }),
       db.cycle.count(),
@@ -63,11 +64,25 @@ export default async function MorePage() {
       db.session.count({ where: { endedAt: { not: null } } }),
       db.savedFood.count(),
       getGoals(),
+      getWeightSummary(),
     ]);
 
   return (
     <main>
       <PageHeader title="More" display subtitle="Setup, library and history." />
+
+      <Group title="Body">
+        <Row
+          href="/track"
+          label="Tracking"
+          description="Weigh-ins, the trend, and which muscles are still sore"
+          meta={
+            body.trend.averageKg == null
+              ? "NOTHING YET"
+              : `${body.trend.averageKg.toFixed(1)}KG${body.loggedToday ? "" : " · DUE"}`
+          }
+        />
+      </Group>
 
       <Group title="Training">
         <Row

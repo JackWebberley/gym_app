@@ -3,11 +3,13 @@ import { startSession } from "@/lib/actions";
 import { logSavedFood } from "@/lib/nutrition-actions";
 import { getHomeData } from "@/lib/queries";
 import { getDayScreen } from "@/lib/nutrition-queries";
+import { getWeightSummary } from "@/lib/track-queries";
 import { formatDayKey, todayKey } from "@/lib/day";
 import { relativeDay } from "@/lib/relative-day";
 import {
   Badge,
   Card,
+  CardLink,
   Eyebrow,
   LinkButton,
   Meter,
@@ -26,7 +28,11 @@ export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
   const dayKey = todayKey();
-  const [home, day] = await Promise.all([getHomeData(), getDayScreen(dayKey)]);
+  const [home, day, body] = await Promise.all([
+    getHomeData(),
+    getDayScreen(dayKey),
+    getWeightSummary(dayKey),
+  ]);
 
   const session = home.inProgress;
   const next = home.next;
@@ -122,6 +128,54 @@ export default async function HomePage() {
             ))}
           </div>
         ) : null}
+      </section>
+
+      {/* ── Body ──────────────────────────────────────────────────────────
+          One line, and a prompt on the mornings it is missing. Weighing in is a
+          ten-second job that only happens if the app asks on the screen you
+          already open; buried behind a tab it would simply not get done. */}
+      <section className="px-4 pb-7">
+        <SectionHeader
+          title="Body"
+          action={
+            <Link href="/track" className="text-caption">
+              Tracking
+            </Link>
+          }
+        />
+
+        <CardLink href="/track" className="flex items-center justify-between gap-4">
+          {body.trend.averageKg == null ? (
+            <div className="min-w-0">
+              <p className="text-body-sm font-medium text-fg-strong">Log your weight</p>
+              <p className="mt-0.5 text-caption text-fg-muted">
+                A few mornings running and the trend starts to mean something.
+              </p>
+            </div>
+          ) : (
+            <div className="min-w-0">
+              <Eyebrow>7-day average</Eyebrow>
+              <p className="mt-1 font-mono text-h3 leading-none text-fg-strong tabular-nums">
+                {body.trend.averageKg.toFixed(1)}
+                <span className="text-body-sm text-fg-faint">kg</span>
+              </p>
+              {body.trend.weeklyChangeKg != null ? (
+                <p className="mt-1 font-mono text-micro tracking-wide text-fg-faint">
+                  {body.trend.weeklyChangeKg < 0 ? "↓" : "↑"}{" "}
+                  {Math.abs(body.trend.weeklyChangeKg).toFixed(2)}KG/WK
+                </p>
+              ) : null}
+            </div>
+          )}
+
+          {body.loggedToday ? (
+            <Badge tone="success">Weighed in</Badge>
+          ) : (
+            <Badge tone="accent" dot>
+              Not yet today
+            </Badge>
+          )}
+        </CardLink>
       </section>
 
       {/* ── Training ─────────────────────────────────────────────────────── */}

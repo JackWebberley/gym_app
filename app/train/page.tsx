@@ -33,6 +33,13 @@ export default async function TrainPage() {
             ? `${home.cycle.name} · ${home.cycle.slots.length} group rotation`
             : "No cycle set up yet"
         }
+        action={
+          // What is recovered decides what is worth training, so the map belongs
+          // one tap from the screen where you pick a session.
+          <Link href="/track#recovery" className="shrink-0 text-caption">
+            Recovery →
+          </Link>
+        }
       />
 
       {home.inProgress ? (
