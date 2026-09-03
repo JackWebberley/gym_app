@@ -31,9 +31,13 @@ export function ActivityRow({ activity, showDay }: { activity: ActivityCard; sho
           </p>
         </div>
         {activity.mappedKind ? (
+          // The day’s band, not this activity’s own: what counted is what the
+          // whole day added up to, and two short walks make a medium day.
           <Badge tone="accent">
             {KIND_LABEL[activity.mappedKind] ?? activity.mappedKind}
-            {activity.mappedBand ? ` · ${BAND_LABEL[activity.mappedBand]}` : ""}
+            {activity.dayBand ?? activity.mappedBand
+              ? ` · ${BAND_LABEL[activity.dayBand ?? activity.mappedBand!] ?? ""}`
+              : ""}
           </Badge>
         ) : (
           <Badge tone="neutral">No allowance</Badge>
@@ -59,7 +63,17 @@ export function ActivityRow({ activity, showDay }: { activity: ActivityCard; sho
       >
         {activity.mappedKind && activity.allowanceKcal != null ? (
           <>
-            Added{" "}
+            {activity.sameKindCount > 1 ? (
+              <>
+                Combined with {activity.sameKindCount - 1} other{" "}
+                {KIND_LABEL[activity.mappedKind]?.toLowerCase() ?? activity.mappedKind}
+                {activity.sameKindCount > 2 ? "s" : ""} that day
+                {activity.sameKindDistance ? ` — ${activity.sameKindDistance} in total` : ""}.
+                The day’s allowance is{" "}
+              </>
+            ) : (
+              <>Added </>
+            )}
             <span className="font-mono text-fg-strong">
               +{activity.allowanceKcal.toLocaleString("en-GB")}
             </span>{" "}

@@ -32,6 +32,15 @@ export type ActivityCard = {
   /** The day's target as it now stands, and whether the cap is holding it down. */
   dayTarget: number;
   dayCapped: boolean;
+  /// How many activities of this kind share the day. Above one, the allowance
+  /// belongs to the day rather than to this activity, and saying "+150" on each
+  /// of two cards reads as +300.
+  sameKindCount: number;
+  /// Their combined distance, which is what the band was actually taken from.
+  sameKindDistance: string | null;
+  /// The band the day landed in, which is not always this activity's own: two
+  /// short walks make a medium day.
+  dayBand: string | null;
 };
 
 type Row = {
@@ -84,11 +93,22 @@ function localLabels(row: { startedLocal: string; startedAt: Date }): {
 async function toCards(rows: Row[], config: ActivityConfig): Promise<ActivityCard[]> {
   if (rows.length === 0) return [];
 
-  // One query for every day involved rather than one per activity.
-  const days = await db.dayLog.findMany({
-    where: { date: { in: [...new Set(rows.map((r) => r.dayKey))] } },
-    select: { date: true, calorieTarget: true, gym: true, golf: true, runBand: true, walkBand: true },
-  });
+  const dayKeys = [...new Set(rows.map((r) => r.dayKey))];
+
+  // Two queries for every day involved, rather than two per activity. The
+  // second one is every activity on those days, not just the ones being
+  // rendered: the band came from the whole day, so explaining it needs the
+  // whole day even when only one of them is on screen.
+  const [days, siblings] = await Promise.all([
+    db.dayLog.findMany({
+      where: { date: { in: dayKeys } },
+      select: { date: true, calorieTarget: true, gym: true, golf: true, runBand: true, walkBand: true },
+    }),
+    db.stravaActivity.findMany({
+      where: { dayKey: { in: dayKeys } },
+      select: { dayKey: true, mappedKind: true, distanceM: true },
+    }),
+  ]);
   const byDay = new Map(days.map((d) => [d.date, d]));
 
   return rows.map((row) => {
@@ -98,6 +118,11 @@ async function toCards(rows: Row[], config: ActivityConfig): Promise<ActivityCar
     // What this activity contributed, read off the day's own sum so a capped
     // day does not claim credit it did not get.
     const part = breakdown?.parts.find((p) => p.kind === row.mappedKind);
+
+    const sameKind = row.mappedKind
+      ? siblings.filter((s) => s.dayKey === row.dayKey && s.mappedKind === row.mappedKind)
+      : [];
+    const sameKindTotal = sameKind.reduce((sum, s) => sum + s.distanceM, 0);
 
     return {
       id: row.id,
@@ -120,6 +145,14 @@ async function toCards(rows: Row[], config: ActivityConfig): Promise<ActivityCar
       noAllowanceReason: row.mappedKind ? null : unmappedReason(row.sportType),
       dayTarget: day?.calorieTarget ?? 0,
       dayCapped: breakdown?.capped ?? false,
+      sameKindCount: sameKind.length,
+      sameKindDistance: formatDistance(sameKindTotal),
+      dayBand:
+        row.mappedKind === "run"
+          ? (day?.runBand ?? null)
+          : row.mappedKind === "walk"
+            ? (day?.walkBand ?? null)
+            : null,
     };
   });
 }
