@@ -4,6 +4,7 @@ import { logSavedFood } from "@/lib/nutrition-actions";
 import { getHomeData } from "@/lib/queries";
 import { getDayScreen } from "@/lib/nutrition-queries";
 import { getWeightSummary } from "@/lib/track-queries";
+import { describeActivities, isRestDay } from "@/lib/activity";
 import { formatDayKey, todayKey } from "@/lib/day";
 import { relativeDay } from "@/lib/relative-day";
 import {
@@ -64,8 +65,8 @@ export default async function HomePage() {
 
         <Card>
           <div className="flex items-center justify-between gap-3">
-            <Badge tone={day.dayType === "golf" ? "accent" : "neutral"}>
-              {day.dayType === "golf" ? "Golf day" : "Base day"}
+            <Badge tone={isRestDay(day.activities) ? "neutral" : "accent"}>
+              {describeActivities(day.activities, day.config)}
             </Badge>
             <span className="font-mono text-micro tracking-wide text-fg-faint">
               {day.entries.length} ENTR{day.entries.length === 1 ? "Y" : "IES"}

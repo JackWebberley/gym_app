@@ -77,7 +77,7 @@ const PROTEIN_FLOOR: Record<MealType, number> = {
 };
 
 const SETTINGS = {
-  baseCalories: 2400,
+  baselineCalories: 2400,
   proteinTargetG: 160,
   partnerCalories: 1700,
   partnerProteinG: 110,

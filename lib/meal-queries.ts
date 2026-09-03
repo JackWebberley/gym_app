@@ -31,7 +31,7 @@ export async function getHouseholdSettings(): Promise<HouseholdSettings> {
   // Splits that no longer divide a day would quietly rescale every envelope, so
   // they are normalised on read rather than trusted.
   return normaliseSplits({
-    baseCalories: settings.baseCalories,
+    baselineCalories: settings.baselineCalories,
     proteinTargetG: settings.proteinTargetG,
     partnerCalories: settings.partnerCalories,
     partnerProteinG: settings.partnerProteinG,
@@ -513,7 +513,7 @@ export async function getDishScreen(menuId: string, recipeId: string) {
     const envelope = envelopeFor(settings, eater, mealType);
     const daily =
       eater === "me"
-        ? { calories: settings.baseCalories, proteinG: settings.proteinTargetG }
+        ? { calories: settings.baselineCalories, proteinG: settings.proteinTargetG }
         : { calories: settings.partnerCalories, proteinG: settings.partnerProteinG };
 
     // Servings across the whole dish, not just this session: the plate card is

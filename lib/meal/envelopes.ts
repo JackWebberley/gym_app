@@ -10,7 +10,7 @@ import type { Envelope, EnvelopeTable, Eater, MealType } from "./types";
 import { MEAL_TYPES } from "./types";
 
 export type HouseholdSettings = {
-  baseCalories: number;
+  baselineCalories: number;
   proteinTargetG: number;
   partnerCalories: number;
   partnerProteinG: number;
@@ -49,7 +49,7 @@ export function splitFor(settings: HouseholdSettings, mealType: MealType): numbe
 
 function dailyFor(settings: HouseholdSettings, eater: Eater) {
   return eater === "me"
-    ? { calories: settings.baseCalories, proteinG: settings.proteinTargetG }
+    ? { calories: settings.baselineCalories, proteinG: settings.proteinTargetG }
     : { calories: settings.partnerCalories, proteinG: settings.partnerProteinG };
 }
 

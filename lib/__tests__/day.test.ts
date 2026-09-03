@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  calorieTargetFor,
   formatDayKey,
   isValidDayKey,
   remaining,
@@ -10,7 +9,6 @@ import {
   todayKey,
 } from "../day";
 
-const goals = { baseCalories: 2400, golfDayCalories: 2800, proteinTargetG: 160 };
 
 describe("toDayKey", () => {
   it("formats a date in local time", () => {
@@ -92,16 +90,6 @@ describe("formatDayKey", () => {
     // en-GB CLDR abbreviates September as "Sept", not "Sep".
     expect(formatDayKey("2026-09-01")).toBe("Tuesday 1 Sept");
     expect(formatDayKey("2026-08-31")).toBe("Monday 31 Aug");
-  });
-});
-
-describe("calorieTargetFor", () => {
-  it("uses the base figure on a normal day", () => {
-    expect(calorieTargetFor("base", goals)).toBe(2400);
-  });
-
-  it("uses the golf figure on a golf day", () => {
-    expect(calorieTargetFor("golf", goals)).toBe(2800);
   });
 });
 

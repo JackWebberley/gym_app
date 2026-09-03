@@ -8,12 +8,12 @@ import {
   estimateEntry,
   logItems,
   logSavedFood,
-  setDayType,
   type ConfirmedItem,
 } from "@/lib/nutrition-actions";
 import type { DayScreen } from "@/lib/nutrition-queries";
 import type { PoolPortion } from "@/lib/meal-queries";
 import { ReadyNow } from "./ready-now";
+import { ActivityPicker } from "./activity-picker";
 import {
   Badge,
   Button,
@@ -147,21 +147,13 @@ export function DayView({
     <div className="space-y-5 px-4">
       {/* ── Targets ─────────────────────────────────────────────────────── */}
       <Card>
-        <div className="flex items-center justify-between gap-3">
-          <Eyebrow>{day.dayType === "golf" ? "Golf day" : "Base day"}</Eyebrow>
-          <form
-            action={() => {
-              startTransition(async () => {
-                await setDayType(day.dayKey, day.dayType === "golf" ? "base" : "golf");
-                router.refresh();
-              });
-            }}
-          >
-            <Button type="submit" variant="ghost" size="sm" disabled={isPending}>
-              ⟳ Switch to {day.dayType === "golf" ? "base" : "golf"}
-            </Button>
-          </form>
-        </div>
+        <ActivityPicker
+          dayKey={day.dayKey}
+          activities={day.activities}
+          config={day.config}
+          storedParts={day.targetParts}
+          storedTarget={day.calories.target}
+        />
 
         {/* Protein first: it is the harder target to hit and the one that matters
             most while cutting (spec §5.4). */}
@@ -172,8 +164,9 @@ export function DayView({
           CARBS {Math.round(day.totals.carbsG)}g · FAT {Math.round(day.totals.fatG)}g
         </p>
         <Hint>
-          Targets are snapshotted onto the day. <Link href="/food/goals">Changing your goals</Link>{" "}
-          will not rewrite days you have already logged.
+          Targets are snapshotted onto the day.{" "}
+          <Link href="/food/goals">Retuning the allowances</Link> will not rewrite days you have
+          already logged.
         </Hint>
       </Card>
 

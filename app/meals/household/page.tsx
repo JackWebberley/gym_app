@@ -31,7 +31,7 @@ export default async function HouseholdPage() {
           splitLunch: settings.splitLunch,
           splitDinner: settings.splitDinner,
           splitSnack: settings.splitSnack,
-          myCalories: settings.baseCalories,
+          myCalories: settings.baselineCalories,
           myProtein: settings.proteinTargetG,
         }}
       />

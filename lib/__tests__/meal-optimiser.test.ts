@@ -96,7 +96,7 @@ function recipe(partial: Partial<RecipeSpec> & { id: string; lines: RecipeSpec["
 }
 
 const SETTINGS = {
-  baseCalories: 2400,
+  baselineCalories: 2400,
   proteinTargetG: 160,
   partnerCalories: 1700,
   partnerProteinG: 110,

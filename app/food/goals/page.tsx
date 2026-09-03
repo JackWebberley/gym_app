@@ -1,26 +1,26 @@
 import Link from "next/link";
-import { getGoals } from "@/lib/nutrition-queries";
+import { getSettings } from "@/lib/nutrition-queries";
 import { PageHeader } from "@/components/ui";
 import { GoalsForm } from "./goals-form";
 
 export const dynamic = "force-dynamic";
 
 export default async function GoalsPage() {
-  const goals = await getGoals();
+  const settings = await getSettings();
 
   return (
     <main>
       <PageHeader
         title="Goals"
         display
-        subtitle="What each day aims at. Golf days get their own calorie figure."
+        subtitle="A rest-day baseline, plus what each activity is worth on top."
         action={
           <Link href="/food" className="shrink-0 text-caption">
             ← Food log
           </Link>
         }
       />
-      <GoalsForm goals={goals} />
+      <GoalsForm initial={settings} />
     </main>
   );
 }

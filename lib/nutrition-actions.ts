@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { db } from "./db";
-import { calorieTargetFor, isValidDayKey, type DayType } from "./day";
+import { isValidDayKey } from "./day";
+import { isDistanceBand, targetFor, type ActivityLog } from "./activity";
 import { estimateMacros } from "./nutrition-estimate";
 import {
   normaliseFoodName,
@@ -11,7 +12,7 @@ import {
   type EstimatedItem,
 } from "./nutrition";
 import { MissingApiKeyError } from "./anthropic-config";
-import { getGoals, getLibrary, getOrCreateDay } from "./nutrition-queries";
+import { getActivityConfig, getGoals, getLibrary, getOrCreateDay } from "./nutrition-queries";
 
 /// Every nutrition mutation. Single user, so validation here is about catching
 /// fat-fingered input, not attacks.
@@ -22,51 +23,119 @@ function assertDayKey(dayKey: string) {
   if (!isValidDayKey(dayKey)) throw new Error(`"${dayKey}" is not a valid date.`);
 }
 
-// ── Goals ─────────────────────────────────────────────────────────────────────
+// ── Goals and the activity model ──────────────────────────────────────────────
 
-export async function saveGoals(input: {
-  baseCalories: number;
-  golfDayCalories: number;
+/** Every tunable number behind a day’s target. All of them are estimates. */
+export type ActivitySettingsInput = {
+  baselineCalories: number;
+  calorieCap: number;
+  addOnScalePercent: number;
   proteinTargetG: number;
-}) {
-  const baseCalories = Math.round(input.baseCalories);
-  const golfDayCalories = Math.round(input.golfDayCalories);
-  const proteinTargetG = Math.round(input.proteinTargetG);
+  gymCalories: number;
+  golfCalories: number;
+  runShortCalories: number;
+  runMediumCalories: number;
+  runLongCalories: number;
+  walkShortCalories: number;
+  walkMediumCalories: number;
+  walkLongCalories: number;
+  bandShortMaxKm: number;
+  bandMediumMaxKm: number;
+};
+
+export async function saveGoals(input: ActivitySettingsInput) {
+  const data = {
+    baselineCalories: Math.round(input.baselineCalories),
+    calorieCap: Math.round(input.calorieCap),
+    addOnScalePercent: Math.round(input.addOnScalePercent),
+    proteinTargetG: Math.round(input.proteinTargetG),
+    gymCalories: Math.round(input.gymCalories),
+    golfCalories: Math.round(input.golfCalories),
+    runShortCalories: Math.round(input.runShortCalories),
+    runMediumCalories: Math.round(input.runMediumCalories),
+    runLongCalories: Math.round(input.runLongCalories),
+    walkShortCalories: Math.round(input.walkShortCalories),
+    walkMediumCalories: Math.round(input.walkMediumCalories),
+    walkLongCalories: Math.round(input.walkLongCalories),
+    bandShortMaxKm: input.bandShortMaxKm,
+    bandMediumMaxKm: input.bandMediumMaxKm,
+  };
 
   for (const [label, value] of [
-    ["Base calories", baseCalories],
-    ["Golf day calories", golfDayCalories],
-    ["Protein target", proteinTargetG],
+    ["Baseline calories", data.baselineCalories],
+    ["The cap", data.calorieCap],
+    ["Protein target", data.proteinTargetG],
   ] as const) {
     if (!Number.isFinite(value) || value <= 0) throw new Error(`${label} must be more than zero.`);
   }
 
+  // An allowance of zero is a legitimate way to switch one off, so these are
+  // only checked for being a sane number rather than for being positive.
+  for (const [label, value] of [
+    ["Scale", data.addOnScalePercent],
+    ["Gym", data.gymCalories],
+    ["Golf", data.golfCalories],
+    ["Run allowances", data.runShortCalories],
+    ["Run allowances", data.runMediumCalories],
+    ["Run allowances", data.runLongCalories],
+    ["Walk allowances", data.walkShortCalories],
+    ["Walk allowances", data.walkMediumCalories],
+    ["Walk allowances", data.walkLongCalories],
+  ] as const) {
+    if (!Number.isFinite(value) || value < 0) throw new Error(`${label} cannot be negative.`);
+  }
+
+  if (data.calorieCap < data.baselineCalories) {
+    // Otherwise every day, including a rest day, silently lands on the cap.
+    throw new Error("The cap cannot be below the baseline.");
+  }
+  if (!(data.bandShortMaxKm > 0) || !(data.bandMediumMaxKm > data.bandShortMaxKm)) {
+    throw new Error("Band edges must increase: the first below the second, both above zero.");
+  }
+
   await db.settings.upsert({
     where: { id: SETTINGS_ID },
-    update: { baseCalories, golfDayCalories, proteinTargetG },
-    create: { id: SETTINGS_ID, baseCalories, golfDayCalories, proteinTargetG },
+    update: data,
+    create: { id: SETTINGS_ID, ...data },
   });
 
-  // Deliberately does not touch existing days: their targets are snapshots.
+  // Deliberately does not touch existing days: their targets are snapshots, and
+  // retuning the model must not rewrite what last Tuesday was aiming at.
   revalidatePath("/food");
   revalidatePath("/");
   revalidatePath("/food/goals");
 }
 
-// ── Day type ──────────────────────────────────────────────────────────────────
+// ── What you did today ────────────────────────────────────────────────────────
 
 /**
- * Flips a day between base and golf, rewriting that day's calorie target (spec §5.4).
- * Only this day changes — every other day keeps the target it was logged against.
+ * Records the day’s activities and re-prices its target.
+ *
+ * Recomputing here is right where recomputing on a settings change would be
+ * wrong: this is you correcting what you actually did that day, not the model
+ * changing its mind about what it was worth.
  */
-export async function setDayType(dayKey: string, dayType: DayType) {
+export async function setDayActivities(dayKey: string, activities: ActivityLog) {
   assertDayKey(dayKey);
+
+  const clean: ActivityLog = {
+    gym: Boolean(activities.gym),
+    golf: Boolean(activities.golf),
+    runBand: isDistanceBand(activities.runBand) ? activities.runBand : null,
+    walkBand: isDistanceBand(activities.walkBand) ? activities.walkBand : null,
+  };
+
   await getOrCreateDay(dayKey);
-  const goals = await getGoals();
+  const config = await getActivityConfig();
+  const breakdown = targetFor(clean, config);
 
   await db.dayLog.update({
     where: { date: dayKey },
-    data: { dayType, calorieTarget: calorieTargetFor(dayType, goals) },
+    data: {
+      ...clean,
+      calorieTarget: breakdown.total,
+      targetParts: JSON.stringify(breakdown.parts),
+    },
   });
 
   revalidatePath("/food");

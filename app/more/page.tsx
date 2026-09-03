@@ -116,7 +116,7 @@ export default async function MorePage() {
           href="/food/goals"
           label="Goals"
           description="Calorie and protein targets, and the golf-day figure"
-          meta={`${goals.baseCalories} KCAL`}
+          meta={`${goals.baselineCalories} KCAL`}
         />
         <Row
           href="/food/library"

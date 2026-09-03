@@ -1,8 +1,6 @@
 /// Day keys and targets. A DayLog is keyed by a local calendar date string, never
 /// a timestamp: a 23:40 snack belongs to that day, not the next one in UTC (spec §11).
 
-export type DayType = "base" | "golf";
-
 /** "YYYY-MM-DD" for a Date, read in *local* time. */
 export function toDayKey(date: Date): string {
   const y = date.getFullYear();
@@ -43,15 +41,9 @@ export function isValidDayKey(key: string): boolean {
 }
 
 export type Goals = {
-  baseCalories: number;
-  golfDayCalories: number;
+  baselineCalories: number;
   proteinTargetG: number;
 };
-
-/** The calorie target a given day type earns. Golf days get their own figure (spec §7). */
-export function calorieTargetFor(dayType: DayType, goals: Goals): number {
-  return dayType === "golf" ? goals.golfDayCalories : goals.baseCalories;
-}
 
 export type Totals = { calories: number; proteinG: number; carbsG: number; fatG: number };
 

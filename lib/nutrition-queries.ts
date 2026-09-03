@@ -1,16 +1,71 @@
 import { db } from "./db";
-import { calorieTargetFor, remaining, sumTotals, todayKey, type DayType, type Goals } from "./day";
+import { remaining, sumTotals, todayKey, type Goals } from "./day";
+import {
+  isDistanceBand,
+  NO_ACTIVITY,
+  parseTargetParts,
+  targetFor,
+  type ActivityConfig,
+  type ActivityLog,
+} from "./activity";
 import type { LibraryEntry } from "./nutrition";
 
 /// Read models for the nutrition screens.
 
 const SETTINGS_ID = "singleton";
 
-/** The goals row, created on first read so the app is never in a half-configured state. */
-export async function getGoals(): Promise<Goals & { heightCm: number | null }> {
+/** The settings row, created on first read so the app is never half-configured. */
+async function settingsRow() {
   const existing = await db.settings.findUnique({ where: { id: SETTINGS_ID } });
   if (existing) return existing;
   return db.settings.create({ data: { id: SETTINGS_ID } });
+}
+
+export async function getGoals(): Promise<Goals & { heightCm: number | null }> {
+  return settingsRow();
+}
+
+/**
+ * Every tunable number behind a day’s target, in the shape the pure model wants.
+ * Read fresh on every compute, and never applied backwards: a day that has
+ * already been stored keeps the target it was stored with.
+ */
+export async function getActivityConfig(): Promise<ActivityConfig> {
+  const settings = await settingsRow();
+  return {
+    baselineCalories: settings.baselineCalories,
+    calorieCap: settings.calorieCap,
+    addOnScalePercent: settings.addOnScalePercent,
+    gymCalories: settings.gymCalories,
+    golfCalories: settings.golfCalories,
+    runCalories: {
+      short: settings.runShortCalories,
+      medium: settings.runMediumCalories,
+      long: settings.runLongCalories,
+    },
+    walkCalories: {
+      short: settings.walkShortCalories,
+      medium: settings.walkMediumCalories,
+      long: settings.walkLongCalories,
+    },
+    bandShortMaxKm: settings.bandShortMaxKm,
+    bandMediumMaxKm: settings.bandMediumMaxKm,
+  };
+}
+
+/** The ticks off a stored row, with the two band columns narrowed to the union. */
+export function activitiesOf(row: {
+  gym: boolean;
+  golf: boolean;
+  runBand: string | null;
+  walkBand: string | null;
+}): ActivityLog {
+  return {
+    gym: row.gym,
+    golf: row.golf,
+    runBand: isDistanceBand(row.runBand) ? row.runBand : null,
+    walkBand: isDistanceBand(row.walkBand) ? row.walkBand : null,
+  };
 }
 
 function parseAliases(raw: string): string[] {
@@ -51,13 +106,17 @@ export async function getOrCreateDay(dayKey: string) {
   const existing = await db.dayLog.findUnique({ where: { date: dayKey } });
   if (existing) return existing;
 
-  const goals = await getGoals();
+  // A day starts as a rest day: the baseline is what you have earned before you
+  // have done anything, and ticking is how it goes up.
+  const [goals, config] = await Promise.all([getGoals(), getActivityConfig()]);
+  const breakdown = targetFor(NO_ACTIVITY, config);
+
   return db.dayLog.create({
     data: {
       date: dayKey,
-      dayType: "base",
-      calorieTarget: calorieTargetFor("base", goals),
+      calorieTarget: breakdown.total,
       proteinTarget: goals.proteinTargetG,
+      targetParts: JSON.stringify(breakdown.parts),
     },
   });
 }
@@ -69,12 +128,20 @@ export async function getDayScreen(dayKey: string = todayKey()) {
   // otherwise stamp today's goals onto days that were never logged — and those
   // snapshots would then look like what you were actually aiming at back then.
   const stored = await db.dayLog.findUnique({ where: { date: dayKey } });
-  const goals = await getGoals();
+  const [goals, config] = await Promise.all([getGoals(), getActivityConfig()]);
+
+  // An unstored day is shown as the rest day it would be created as, priced at
+  // today’s settings — nothing is written, so nothing is committed to.
+  const unsaved = targetFor(NO_ACTIVITY, config);
   const day = stored ?? {
     date: dayKey,
-    dayType: "base" as const,
-    calorieTarget: calorieTargetFor("base", goals),
+    calorieTarget: unsaved.total,
     proteinTarget: goals.proteinTargetG,
+    targetParts: JSON.stringify(unsaved.parts),
+    gym: false,
+    golf: false,
+    runBand: null,
+    walkBand: null,
   };
 
   const [entries, quickAdd, libraryCount] = await Promise.all([
@@ -95,7 +162,10 @@ export async function getDayScreen(dayKey: string = todayKey()) {
 
   return {
     dayKey,
-    dayType: day.dayType as DayType,
+    activities: activitiesOf(day),
+    config,
+    /// The sum as it stood when the day was stored, not as it would price today.
+    targetParts: parseTargetParts(day.targetParts),
     entries: entries.map((e) => ({
       id: e.id,
       description: e.description,
@@ -132,4 +202,9 @@ export async function getSavedFoods() {
 /** Whether chat estimation is available at all, so the UI can say so up front. */
 export function isEstimationConfigured(): boolean {
   return Boolean(process.env.ANTHROPIC_API_KEY);
+}
+
+/** The whole settings row, for the screen that tunes the model. */
+export async function getSettings() {
+  return settingsRow();
 }

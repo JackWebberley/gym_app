@@ -158,7 +158,7 @@ describe("portionMacros", () => {
 
 describe("envelopes", () => {
   const settings = {
-    baseCalories: 2400,
+    baselineCalories: 2400,
     proteinTargetG: 160,
     partnerCalories: 1700,
     partnerProteinG: 110,

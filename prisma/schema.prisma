@@ -147,13 +147,45 @@ model SetLog {
 
 /// Single-user app, so one row, always id "singleton".
 model Settings {
-  id                 String @id @default("singleton")
-  baseCalories       Int    @default(2400)
-  golfDayCalories    Int    @default(2800)
+  id String @id @default("singleton")
+  /// A rest day, and the floor every other day is built up from. Also what the
+  /// meal planner sizes portions against: a serving sits in a pool and gets
+  /// eaten on whichever day it gets eaten, so fitting it to the quietest day
+  /// means it always fits, and an active day's allowance is headroom on top.
+  baselineCalories   Int    @default(2200)
   proteinTargetG     Int    @default(160)
   /// Phase 4 (the feedback loop) reads these; nothing surfaces them yet.
   weeklyLossTargetKg Float  @default(0.45)
   heightCm           Int?
+
+  /// ── Activity allowances ───────────────────────────────────────────────────
+  /// What a day's activity is worth on top of the baseline. Every figure here is
+  /// editable, because they are estimates that want tuning against what the
+  /// weight trend actually does — none of them is a fact.
+  ///
+  /// No day goes above the cap however much you did: the numbers are guesses,
+  /// and stacked guesses drift further than a single one.
+  calorieCap Int @default(2900)
+  /// Shrinks or grows every allowance together, leaving the baseline alone. The
+  /// one dial to turn when the trend says the whole model is too generous.
+  addOnScalePercent Int @default(100)
+
+  gymCalories  Int @default(200)
+  /// Golf already includes the walking, so a golf day ignores the walk tick.
+  golfCalories Int @default(600)
+
+  runShortCalories  Int @default(200)
+  runMediumCalories Int @default(350)
+  runLongCalories   Int @default(500)
+
+  walkShortCalories  Int @default(75)
+  walkMediumCalories Int @default(150)
+  walkLongCalories   Int @default(250)
+
+  /// Band edges, in km. Short is up to the first, medium up to the second, long
+  /// is anything beyond.
+  bandShortMaxKm  Float @default(5)
+  bandMediumMaxKm Float @default(10)
 
   /// ── Household (spec §8, adapted) ──────────────────────────────────────────
   /// Meals are cooked for two. Her figures size the shop and scale her half of
@@ -176,14 +208,33 @@ model DayLog {
   /// "YYYY-MM-DD" in local time. SQLite has no date type, and a timestamp would
   /// push a 23:40 snack into the next day in UTC (spec §11) — a plain date string
   /// cannot drift, and still sorts and range-queries correctly.
-  date          String @id
-  dayType       String @default("base") // "base" | "golf"
+  date String @id
   /// Snapshotted at creation, never derived. Changing your targets in three weeks
   /// must not silently rewrite your history (spec §3).
   calorieTarget Int
   proteinTarget Int
   weightKg      Float?
   steps         Int?
+
+  /// ── What you did that day ─────────────────────────────────────────────────
+  /// The ticks that built the target. Editing these recomputes the day, which is
+  /// right — you are correcting what you actually did. Editing the *settings*
+  /// never touches a day already stored, which is the rule that matters.
+  gym  Boolean @default(false)
+  golf Boolean @default(false)
+  /// "short" | "medium" | "long", or null for not ticked. The band is what earns
+  /// the allowance, not the distance — you tick a band.
+  runBand  String?
+  walkBand String?
+  /// Set only when something knew the real distance (Strava, later). Recorded
+  /// beside the band for the history; the band is still what was counted.
+  runKm  Float?
+  walkKm Float?
+  /// How the target was arrived at, snapshotted with it as JSON:
+  /// [{ "kind": "baseline", "kcal": 2200 }, ...]. Without this, showing the sum
+  /// behind an old day would recompute it against today's settings and disagree
+  /// with the total sitting next to it.
+  targetParts String @default("[]")
 
   entries FoodEntry[]
 }
