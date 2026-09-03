@@ -5,6 +5,8 @@ import { getHomeData } from "@/lib/queries";
 import { getDayScreen } from "@/lib/nutrition-queries";
 import { getWeightSummary } from "@/lib/track-queries";
 import { describeActivities, isRestDay } from "@/lib/activity";
+import { getUnseenActivities } from "@/lib/strava-queries";
+import { NewActivityPopup } from "@/components/new-activity-popup";
 import { formatDayKey, todayKey } from "@/lib/day";
 import { relativeDay } from "@/lib/relative-day";
 import {
@@ -29,10 +31,13 @@ export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
   const dayKey = todayKey();
-  const [home, day, body] = await Promise.all([
+  const [home, day, body, unseen] = await Promise.all([
     getHomeData(),
     getDayScreen(dayKey),
     getWeightSummary(dayKey),
+    // The home screen is the manifest start_url, so this is where "next time you
+    // open the app" actually lands.
+    getUnseenActivities(),
   ]);
 
   const session = home.inProgress;
@@ -41,6 +46,8 @@ export default async function HomePage() {
 
   return (
     <main>
+      <NewActivityPopup activities={unseen} />
+
       <header className="flex items-start justify-between gap-4 px-4 pt-8 pb-6">
         <div className="min-w-0">
           <Eyebrow>{formatDayKey(dayKey)}</Eyebrow>

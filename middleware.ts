@@ -38,10 +38,15 @@ export const config = {
     /*
      * Everything except:
      *   login            — the gate itself
+     *   api/strava/webhook — Strava cannot log in. Safe to leave open: it
+     *                      accepts no data, only an activity id, and acts
+     *                      solely on what Strava's own API returns for it.
+     *                      It checks Strava's verify token on the handshake
+     *                      and the athlete id on every event.
      *   _next/static     — hashed build assets, no data in them
      *   _next/image      — image optimiser
      *   favicon, icons, manifest — requested before the cookie exists
      */
-    "/((?!login|_next/static|_next/image|favicon|icon|apple-icon|manifest|robots|sitemap).*)",
+    "/((?!login|api/strava/webhook|_next/static|_next/image|favicon|icon|apple-icon|manifest|robots|sitemap).*)",
   ],
 };

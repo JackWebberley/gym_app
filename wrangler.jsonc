@@ -55,5 +55,9 @@
   //   DIRECT_URL
   //   ANTHROPIC_API_KEY
   //   ANTHROPIC_WORKSPACE_ID   (only for an identity-linked key)
+  //   APP_PASSCODE
+  //   AUTH_SECRET
+  //   STRAVA_CLIENT_ID
+  //   STRAVA_CLIENT_SECRET
   "vars": {}
 }

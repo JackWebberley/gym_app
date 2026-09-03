@@ -56,7 +56,7 @@ function Group({ title, children }: { title: string; children: React.ReactNode }
 }
 
 export default async function MorePage() {
-  const [groupCount, cycleCount, exerciseCount, sessionCount, savedFoodCount, goals, body] =
+  const [groupCount, cycleCount, exerciseCount, sessionCount, savedFoodCount, goals, body, strava] =
     await Promise.all([
       db.exerciseGroup.count({ where: { isArchived: false } }),
       db.cycle.count(),
@@ -65,6 +65,7 @@ export default async function MorePage() {
       db.savedFood.count(),
       getGoals(),
       getWeightSummary(),
+      db.stravaAccount.findUnique({ where: { id: "singleton" }, select: { subscriptionId: true } }),
     ]);
 
   return (
@@ -81,6 +82,12 @@ export default async function MorePage() {
               ? "NOTHING YET"
               : `${body.trend.averageKg.toFixed(1)}KG${body.loggedToday ? "" : " · DUE"}`
           }
+        />
+        <Row
+          href="/strava"
+          label="Strava"
+          description="Import workouts and tick the day automatically"
+          meta={strava ? (strava.subscriptionId ? "LIVE" : "MANUAL") : "OFF"}
         />
       </Group>
 

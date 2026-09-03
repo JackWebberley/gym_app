@@ -147,7 +147,7 @@ model SetLog {
 
 /// Single-user app, so one row, always id "singleton".
 model Settings {
-  id String @id @default("singleton")
+  id                 String @id @default("singleton")
   /// A rest day, and the floor every other day is built up from. Also what the
   /// meal planner sizes portions against: a serving sits in a pool and gets
   /// eaten on whichever day it gets eaten, so fitting it to the quietest day
@@ -165,7 +165,7 @@ model Settings {
   ///
   /// No day goes above the cap however much you did: the numbers are guesses,
   /// and stacked guesses drift further than a single one.
-  calorieCap Int @default(2900)
+  calorieCap        Int @default(2900)
   /// Shrinks or grows every allowance together, leaving the baseline alone. The
   /// one dial to turn when the trend says the whole model is too generous.
   addOnScalePercent Int @default(100)
@@ -208,7 +208,7 @@ model DayLog {
   /// "YYYY-MM-DD" in local time. SQLite has no date type, and a timestamp would
   /// push a 23:40 snack into the next day in UTC (spec §11) — a plain date string
   /// cannot drift, and still sorts and range-queries correctly.
-  date String @id
+  date          String @id
   /// Snapshotted at creation, never derived. Changing your targets in three weeks
   /// must not silently rewrite your history (spec §3).
   calorieTarget Int
@@ -220,21 +220,25 @@ model DayLog {
   /// The ticks that built the target. Editing these recomputes the day, which is
   /// right — you are correcting what you actually did. Editing the *settings*
   /// never touches a day already stored, which is the rule that matters.
-  gym  Boolean @default(false)
-  golf Boolean @default(false)
+  gym         Boolean @default(false)
+  golf        Boolean @default(false)
   /// "short" | "medium" | "long", or null for not ticked. The band is what earns
   /// the allowance, not the distance — you tick a band.
-  runBand  String?
-  walkBand String?
+  runBand     String?
+  walkBand    String?
   /// Set only when something knew the real distance (Strava, later). Recorded
   /// beside the band for the history; the band is still what was counted.
-  runKm  Float?
-  walkKm Float?
+  runKm       Float?
+  walkKm      Float?
+  /// What Strava last set on this day, as JSON. Kept so a re-sync can tell a
+  /// tick it set itself from one you pressed: it may replace its own, and must
+  /// leave yours alone.
+  stravaTicks String  @default("{}")
   /// How the target was arrived at, snapshotted with it as JSON:
   /// [{ "kind": "baseline", "kcal": 2200 }, ...]. Without this, showing the sum
   /// behind an old day would recompute it against today's settings and disagree
   /// with the total sitting next to it.
-  targetParts String @default("[]")
+  targetParts String  @default("[]")
 
   entries FoodEntry[]
 }
@@ -565,4 +569,91 @@ model ShoppingLine {
   @@index([menuId])
   @@index([ingredientId])
   @@index([packSizeId])
+}
+
+/// ─────────────────────────────────────────────────────────────────────────────
+/// Strava
+///
+/// A workout logged on a watch should not need logging again by hand. Strava
+/// pushes an event when an activity appears, the app fetches it, and the day's
+/// activity ticks follow from what it says — the same ticks you would have
+/// pressed yourself, pressed for you.
+/// ─────────────────────────────────────────────────────────────────────────────
+
+/// One athlete, because one user. Tokens live here rather than in env: the
+/// access token expires every six hours and has to be rewritten.
+model StravaAccount {
+  id             String    @id @default("singleton")
+  athleteId      String    @unique
+  athleteName    String?
+  accessToken    String
+  refreshToken   String
+  /// When the access token dies. Refreshed a little before this.
+  expiresAt      DateTime
+  scope          String
+  connectedAt    DateTime  @default(now())
+  /// Strava's id for our push subscription, once one exists. One per
+  /// application, so this is either set or we are not receiving events.
+  subscriptionId String?
+  lastSyncedAt   DateTime?
+}
+
+/// An activity as Strava describes it, kept whether or not the model has an
+/// allowance for it — a swim still deserves to show up, it just does not move
+/// the calorie target.
+model StravaActivity {
+  /// Strava's own id, as text. These are past 2^53 and JSON has one number type.
+  id String @id
+
+  /// The local calendar day it counts towards, derived from the local start
+  /// time. A 23:40 run belongs to that day, not to the next one in UTC.
+  dayKey String
+
+  name             String
+  sportType        String
+  startedAt        DateTime
+  distanceM        Float
+  movingSeconds    Int
+  elapsedSeconds   Int
+  elevationM       Float?
+  /// Strava's own calorie estimate. Recorded for comparison, never used as the
+  /// target: the allowance model is the thing being tuned, and mixing a second
+  /// estimate into it would make neither answerable.
+  stravaCalories   Float?
+  averageHeartRate Float?
+  maxHeartRate     Float?
+
+  /// What it mapped to: "gym" | "golf" | "run" | "walk", or null for a sport
+  /// with no allowance.
+  mappedKind String?
+  mappedBand String?
+
+  /// Null until it has been shown in the "new activity" card on the home screen.
+  seenAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([dayKey])
+  @@index([seenAt])
+  @@index([startedAt])
+}
+
+/// The webhook inbox.
+///
+/// Strava wants a 200 within two seconds and retries otherwise, which is not
+/// enough time to fetch the activity and re-price a day on a cold worker. So the
+/// event is written down and acknowledged immediately, and the work happens
+/// after. It doubles as the audit trail when a sync does not do what you expect.
+model StravaEvent {
+  id          String    @id @default(cuid())
+  objectType  String
+  objectId    String
+  aspectType  String
+  ownerId     String
+  eventTime   DateTime
+  receivedAt  DateTime  @default(now())
+  processedAt DateTime?
+  /// Set when processing failed. The row stays so it can be retried.
+  error       String?
+
+  @@index([processedAt])
 }
