@@ -37,6 +37,7 @@ export async function recordActivity(detail: StravaActivityDetail) {
     name: detail.name,
     sportType: detail.sport_type ?? detail.type ?? "Workout",
     startedAt: new Date(detail.start_date),
+    startedLocal: detail.start_date_local ?? "",
     distanceM: detail.distance ?? 0,
     movingSeconds: Math.round(detail.moving_time ?? 0),
     elapsedSeconds: Math.round(detail.elapsed_time ?? 0),
@@ -186,7 +187,8 @@ export async function processPendingEvents(limit = 25): Promise<{ done: number; 
  * and as the manual way out when a webhook has been missed.
  */
 export async function backfillRecent(perPage = 20): Promise<{ imported: number; days: string[] }> {
-  if (!(await getAccount())) return { imported: 0, days: [] };
+  const account = await getAccount();
+  if (!account) return { imported: 0, days: [] };
 
   const details = await fetchRecentActivities(perPage);
   const days = new Set<string>();
@@ -195,6 +197,14 @@ export async function backfillRecent(perPage = 20): Promise<{ imported: number; 
     const activity = await recordActivity(detail);
     days.add(activity.dayKey);
   }
+
+  // Anything from before you connected is history, not news. Without this,
+  // connecting greets you with a sheet full of last month’s runs — and the
+  // popup means "this just synced", which those did not.
+  await db.stravaActivity.updateMany({
+    where: { seenAt: null, startedAt: { lt: account.connectedAt } },
+    data: { seenAt: new Date() },
+  });
 
   for (const dayKey of days) await resyncDay(dayKey);
 

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getStravaScreen } from "@/lib/strava-queries";
-import { Card, Eyebrow, EmptyState, Hint, LinkButton, Note, PageHeader, SectionHeader } from "@/components/ui";
+import { BASE_PATH } from "@/lib/auth";
+import { AnchorButton, Card, Eyebrow, EmptyState, Hint, Note, PageHeader, SectionHeader } from "@/components/ui";
 import { StravaControls } from "./strava-controls";
 import { ActivityRow } from "./activity-list";
 
@@ -75,16 +76,17 @@ export default async function StravaPage({
               was worth and ticks your day for you — a 7km run sets Run 5–10 km and moves the target
               accordingly.
             </p>
-            <LinkButton
-              href="/api/strava/connect"
+            {/* A plain anchor: this is a route handler that redirects to
+                strava.com, and the client router cannot follow that. */}
+            <AnchorButton
+              href={`${BASE_PATH}/api/strava/connect`}
               variant="accent"
               size="lg"
               fullWidth
               className="mt-4"
-              prefetch={false}
             >
               Connect Strava
-            </LinkButton>
+            </AnchorButton>
             <Hint>
               Read-only. The app never posts anything to Strava, and asks for no write permission.
             </Hint>

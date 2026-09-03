@@ -19,8 +19,6 @@ const BAND_LABEL: Record<string, string> = {
 };
 
 export function ActivityRow({ activity, showDay }: { activity: ActivityCard; showDay?: boolean }) {
-  const when = new Date(activity.startedAt);
-
   return (
     <Card className="p-4">
       <div className="flex items-start justify-between gap-3">
@@ -28,9 +26,8 @@ export function ActivityRow({ activity, showDay }: { activity: ActivityCard; sho
           <p className="truncate text-body-sm font-medium text-fg-strong">{activity.name}</p>
           <p className="mt-0.5 font-mono text-micro tracking-wide text-fg-faint uppercase">
             {activity.sportType.replace(/([a-z])([A-Z])/g, "$1 $2")}
-            {showDay ? ` · ${when.toLocaleDateString("en-GB", { day: "numeric", month: "short" })}` : ""}
-            {" · "}
-            {when.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
+            {showDay ? ` · ${activity.dateLabel}` : ""}
+            {` · ${activity.timeLabel}`}
           </p>
         </div>
         {activity.mappedKind ? (

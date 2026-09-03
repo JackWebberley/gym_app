@@ -612,6 +612,12 @@ model StravaActivity {
   name             String
   sportType        String
   startedAt        DateTime
+  /// The wall-clock time where you were, exactly as Strava reports it
+  /// ("2026-09-02T13:43:00Z" — the Z is a lie). Kept as text and sliced rather
+  /// than converted: startedAt renders in the server's timezone on a server
+  /// component and the browser's in a client one, and the same run then shows
+  /// two different times on two screens.
+  startedLocal     String    @default("")
   distanceM        Float
   movingSeconds    Int
   elapsedSeconds   Int

@@ -12,6 +12,10 @@ export type ActivityCard = {
   name: string;
   sportType: string;
   startedAt: string;
+  /// "13:43" and "2 Sept", already formatted: the same strings on every screen,
+  /// whichever timezone the thing rendering them happens to be in.
+  timeLabel: string;
+  dateLabel: string;
   /** Pre-formatted, because both the card and the popup want the same strings. */
   distance: string | null;
   duration: string;
@@ -36,6 +40,7 @@ type Row = {
   name: string;
   sportType: string;
   startedAt: Date;
+  startedLocal: string;
   distanceM: number;
   movingSeconds: number;
   elapsedSeconds: number;
@@ -45,6 +50,36 @@ type Row = {
   mappedKind: string | null;
   mappedBand: string | null;
 };
+
+/**
+ * Time and date as they read on the watch.
+ *
+ * Sliced out of Strava’s local string, not converted from the instant: a
+ * conversion lands in the server timezone when a server component renders it and
+ * the browser timezone when a client one does, and the popup and the Strava page
+ * disagreed by two hours because of exactly that.
+ */
+function localLabels(row: { startedLocal: string; startedAt: Date }): {
+  timeLabel: string;
+  dateLabel: string;
+} {
+  const local = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(row.startedLocal) ? row.startedLocal : null;
+  if (!local) {
+    // Imported before this was stored; re-syncing fills it in.
+    return {
+      timeLabel: row.startedAt.toISOString().slice(11, 16),
+      dateLabel: row.startedAt.toISOString().slice(0, 10),
+    };
+  }
+  const [y, m, d] = local.slice(0, 10).split("-").map(Number);
+  return {
+    timeLabel: local.slice(11, 16),
+    dateLabel: new Date(y, m - 1, d, 12).toLocaleDateString("en-GB", {
+      day: "numeric",
+      month: "short",
+    }),
+  };
+}
 
 async function toCards(rows: Row[], config: ActivityConfig): Promise<ActivityCard[]> {
   if (rows.length === 0) return [];
@@ -70,6 +105,7 @@ async function toCards(rows: Row[], config: ActivityConfig): Promise<ActivityCar
       name: row.name,
       sportType: row.sportType,
       startedAt: row.startedAt.toISOString(),
+      ...localLabels(row),
       distance: formatDistance(row.distanceM),
       duration: formatDuration(row.movingSeconds || row.elapsedSeconds),
       pace: row.mappedKind === "run" || row.mappedKind === "walk"

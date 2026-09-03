@@ -64,6 +64,21 @@ export function LinkButton({
   return <Link className={buttonClass({ variant, size, fullWidth }, className)} {...props} />;
 }
 
+/**
+ * A real anchor, for destinations the client router must not try to handle: a
+ * route handler that redirects off-site, or anything outside the app. next/link
+ * would attempt a client-side navigation and simply do nothing.
+ */
+export function AnchorButton({
+  variant,
+  size,
+  fullWidth,
+  className,
+  ...props
+}: ComponentProps<"a"> & ButtonStyleProps) {
+  return <a className={buttonClass({ variant, size, fullWidth }, className)} {...props} />;
+}
+
 /** For server-action `<form>` submits, where a plain button is the submitter. */
 export function SubmitButton({
   variant,
